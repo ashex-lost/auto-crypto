@@ -10,7 +10,7 @@ from config import binding, settings
 from storage import Store
 from engine import tick
 from execution import approve,executor
-from ledger import summary
+from finance import summary
 from dashboard import PAGE
 
 HEADERS={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"}

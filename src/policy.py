@@ -1,11 +1,10 @@
 """Build immutable, individually approved plans from operator-reviewed adapters."""
 import json
 from common import Blocked, address, canonical, decimal, digest, integer, now
-from economics import allocated_monthly_cost, estimate, worth_review
-from execution import executor
+from finance import allocated_monthly_cost, estimate, worth_review
 
 
-async def proposal(env,store,s,opportunity,analysis):
+async def proposal(store,s,opportunity,analysis,preview_vault):
     if opportunity["source"] == "binance":
         raise Blocked("binance_launchpool_execution_not_verified")
     data = json.loads(opportunity["data"])
@@ -30,7 +29,7 @@ async def proposal(env,store,s,opportunity,analysis):
     days = min(s["horizon_days"], (int(data["earliestCampaignEnd"])-now())//86400)
     if days<1:
         raise Blocked("campaign_window_too_short")
-    preview = await executor(env,"/preview",{"vault_id":v["id"],"amount_raw":v["amount_raw"]})
+    preview = await preview_vault({"vault_id":v["id"],"amount_raw":v["amount_raw"]})
     if not preview.get("ready"):
         raise Blocked("wallet_not_ready")
     nominal=(int(v['amount_raw'])*1000000+10**preview['asset_decimals']-1)//10**preview['asset_decimals']

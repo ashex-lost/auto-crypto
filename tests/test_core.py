@@ -11,14 +11,15 @@ from unittest.mock import AsyncMock, patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 from common import Blocked,canonical,digest,json_object
-from economics import estimate,worth_review,COST_FIELDS
+from finance import estimate,worth_review,COST_FIELDS
 from config import settings
 from storage import Store
 from collector import merkl_candidate,save_candidate,Announcements
-from analyst import usage_cost,call_model
-from ledger import position_result
+from ai import call_model
+from finance import usage_cost
+from finance import position_result
 from engine import tick
-from valuation import value_receipts
+from finance import value_receipts
 
 
 class Statement:
@@ -105,6 +106,31 @@ class Rules(unittest.TestCase):
 class Persistence(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self): self.db=D1();self.store=Store(self.db)
     async def asyncTearDown(self): self.db.conn.close()
+
+    async def test_valuation_uses_supplied_quotes_and_keeps_actual_amounts(self):
+        from finance import value_position
+        state={'plan':{'vault_id':'v','chain_id':1},'stage':'closed','deposited_raw':'100000000',
+               'redeemed_raw':'100000000','claimed_raw':'2000000','fee_wei':'1000000000000000'}
+        before=canonical(state)
+        quotes=AsyncMock(side_effect=[{'symbol':'ETHUSDT','price':'1000'},{'symbol':'USDCUSDT','price':'1'}])
+        result=await value_position(state,{'vaults':[{'id':'v','asset_symbol':'USDC','asset_decimals':6}]},quotes)
+        self.assertEqual(result['net_before_shared_operating_costs_usdt_micro'],1_000_000)
+        self.assertEqual(canonical(state),before)
+        self.assertEqual(quotes.await_count,2)
+
+    async def test_scheduler_prepares_and_saves_read_only_review(self):
+        from common import now
+        await self.store.run('UPDATE control SET paused=0,next_discovery=? WHERE id=1',now()+86400)
+        advice={'conclusion':'No completed positions','continue_research':True,'proposed_changes':[], 'missing_evidence':['receipts']}
+        with patch('engine.review',new=AsyncMock(return_value=advice)) as model:
+            result=await tick(SimpleNamespace(),self.store)
+        self.assertEqual(result['state'],'reviewed')
+        report=model.await_args.args[3]
+        self.assertEqual(report['ledger']['positions'],[])
+        self.assertEqual(report['screening'],[])
+        saved=await self.store.one('SELECT data FROM reviews')
+        self.assertEqual(json.loads(saved['data']),advice)
+
     async def test_single_lease(self):
         got=await asyncio.gather(*[self.store.acquire(100) for _ in range(20)])
         self.assertEqual(sum(x is not None for x in got),1)

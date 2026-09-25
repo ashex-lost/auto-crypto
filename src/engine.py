@@ -1,16 +1,15 @@
 """One bounded state-machine step per invocation; cron is only a wake-up signal."""
 import json
+from functools import partial
 from common import Blocked, canonical, now
 from config import settings
 from collector import discover,refresh_merkl
-from analyst import analyze
+from ai import analyze, review
 from policy import proposal
 from execution import advance,executor
 from notifier import deliver
-from review import review
-from ledger import reconcile_reservation
-from valuation import value_position
-from economics import estimate,worth_review
+from finance import reconcile_reservation, value_position, estimate, worth_review, summary
+from network import get_json
 
 
 async def process_execution(env,store,paused=False):
@@ -48,7 +47,7 @@ async def process_execution(env,store,paused=False):
     stage=state["stage"]
     old=json.loads(p['executor_state']) if p['executor_state'] else {}
     if len(state.get('receipts',[]))!=len(old.get('receipts',[])) or old.get('valuation',{}).get('as_of',0)<now()-3600:
-        state['valuation']=await value_position(state,settings(env))
+        state['valuation']=await value_position(state,settings(env),read_quote=get_json)
     elif old.get('valuation'):
         state['valuation']=old['valuation']
     mapped={'approved':'approved','allowance_set':'executing','deposited':'executing','holding':'holding',
@@ -65,7 +64,7 @@ async def evaluate(env,store,s,candidate,analysis):
     # Recalculate once per day without paying to re-read unchanged rules.
     await store.run("UPDATE opportunities SET evaluation_due=? WHERE id=?",now()+86400,candidate["id"])
     try:
-        p=await proposal(env,store,s,candidate,analysis)
+        p=await proposal(store,s,candidate,analysis,preview_vault=partial(executor,env,"/preview"))
         await store.run("INSERT INTO proposals(id,opportunity_id,fingerprint,plan,digest,created_at,expires_at) VALUES(?,?,?,?,?,?,?)",
                         p["id"],candidate["id"],candidate["fingerprint"],canonical(p),p["digest"],now(),p["plan"]["expires_at"])
         await store.event(p["id"]+":approve","approval_required",{"id":p["id"]},p["id"])
@@ -120,7 +119,12 @@ async def tick(env,store,cron=False):
             return await evaluate(env,store,s,cached,json.loads(cached["analysis"]))
         if control["next_review"]<=t:
             await store.run("UPDATE control SET next_review=? WHERE id=1",t+7*86400)
-            result=await review(env,store,s)
+            ledger=await summary(store)
+            ledger["positions"]=[{k:v for k,v in row.items() if k!='receipts'} for row in ledger["positions"][:5]]
+            counts=await store.all("SELECT status,COUNT(*) AS count FROM opportunities GROUP BY status")
+            result=await review(env,store,s,{"ledger":ledger,"screening":counts})
+            reviewed_at=now()
+            await store.run("INSERT INTO reviews(id,created_at,data) VALUES(?,?,?)",str(reviewed_at),reviewed_at,canonical(result))
             return {"state":"reviewed","review":result}
         return {"state":"execution_checked" if executed else "idle"}
     except Blocked as e:
