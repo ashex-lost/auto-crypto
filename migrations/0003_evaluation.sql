@@ -1,0 +1,1 @@
+ALTER TABLE opportunities ADD COLUMN evaluation_due INTEGER NOT NULL DEFAULT 0;
