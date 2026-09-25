@@ -1,0 +1,3 @@
+# Local development only. Replace with a randomly generated token, 32+ characters.
+# Never use this placeholder as a real secret. .dev.vars is ignored by Git.
+ADMIN_TOKEN=replace-me

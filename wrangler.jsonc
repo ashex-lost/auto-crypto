@@ -1,18 +1,18 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "auto-crypto-simulation",
-  "main": "src/index.js",
+  "main": "src/worker.py",
+  "compatibility_flags": ["python_workers"],
   "compatibility_date": "2026-09-23",
-  "workers_dev": true,
-  "triggers": { "crons": ["*/5 * * * *"] },
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": { "crons": [] },
   "d1_databases": [{
     "binding": "DB",
     "database_name": "auto-crypto-sim",
-    "database_id": "1f599656-7852-47dc-b9ff-8b3fa4f9d976"
+    "database_id": "1f599656-7852-47dc-b9ff-8b3fa4f9d976",
+    "migrations_dir": "migrations"
   }],
-  "vars": {
-    "RUN_MODE": "simulation",
-    "SIM_PER_TASK_CENTS": "100",
-    "SIM_TOTAL_CENTS": "1000"
-  }
+  "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"}],
+  "vars": {"SETTINGS_JSON": "{}"}
 }
