@@ -53,7 +53,7 @@ async def save_candidate(store, c):
     await store.run("""INSERT INTO opportunities(id,source,title,url,fingerprint,data,observed_at)
         VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,url=excluded.url,
         fingerprint=excluded.fingerprint,data=excluded.data,observed_at=excluded.observed_at,
-        status=CASE WHEN opportunities.fingerprint!=excluded.fingerprint THEN 'discovered' ELSE opportunities.status END""",
+        status=CASE WHEN opportunities.fingerprint!=excluded.fingerprint OR opportunities.status='screened_out' THEN 'discovered' ELSE opportunities.status END""",
         c["id"],c["source"],c["title"],c["url"],c["fingerprint"],canonical(c["data"]),now())
 
 

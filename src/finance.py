@@ -148,3 +148,25 @@ async def value_position(state,s,read_quote):
         return value_receipts(state,decimals,asset_price,native_data['price'],now())
     except (Blocked,KeyError,ValueError):
         return {'status':'market_quote_unavailable','as_of':now()}
+
+
+
+def research_estimate(data, s):
+    """Illustrative budget calculation without a wallet, not an executable proposal."""
+    principal=s['research_principal_usd_micro']
+    from common import campaign_timestamp
+    end=campaign_timestamp(data.get('earliestCampaignEnd'))
+    days=min(s['horizon_days'],max(0,(end-now())//86400)) if type(end) is int else 0
+    if days<1 or data.get('apr') is None:
+        return {'state':'insufficient_data','net_usd_micro':None,'participation_approved':False}
+    costs={k:None for k in COST_FIELDS}
+    costs['ai']=allocated_monthly_cost(s['monthly_ai_usd_micro'],days)
+    costs['hosting']=allocated_monthly_cost(s['monthly_fixed_usd_micro'],days)
+    costs['search_data']=s['data_search_usd_micro_per_cycle']
+    try:
+        result=estimate(principal,data['apr'],days,costs)
+    except Blocked:
+        return {'state':'invalid_apr','net_usd_micro':None,'participation_approved':False}
+    return {'state':'research_only','reference_principal_not_investment':True,
+            'participation_approved':False,'economics':result,
+            'note':'只用于比较活动；尚无钱包预览及完整费用，不能据此判定值得参与。APR 可能包含不同来源收益。'}

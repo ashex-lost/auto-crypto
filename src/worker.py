@@ -43,9 +43,10 @@ class Default(WorkerEntrypoint):
                 if not control:
                     raise Blocked("database_not_initialized")
                 proposals=await store.all("SELECT * FROM proposals ORDER BY created_at DESC LIMIT 20")
-                candidates=await store.all("SELECT id,title,url,observed_at,status,analysis FROM opportunities ORDER BY observed_at DESC LIMIT 50")
+                candidates=await store.all("SELECT id,title,url,observed_at,status,analysis,screening FROM opportunities ORDER BY observed_at DESC LIMIT 50")
                 for c in candidates:
                     c["analysis"]=json.loads(c["analysis"]) if c["analysis"] else None
+                    c["screening"]=json.loads(c["screening"]) if c["screening"] else None
                 return response({"runtime":{"paused":bool(control["paused"]),"last_tick":control["last_tick"],
                     "last_success":control["last_success"],"last_cron":control["last_cron"],"error":control["error_code"],
                     "sources":await store.all("SELECT * FROM sources"),"model_key_connected":bool(binding(self.env,"MODEL_API_KEY")),
@@ -53,6 +54,7 @@ class Default(WorkerEntrypoint):
                     "notification_channel":"telegram" if binding(self.env,"TELEGRAM_BOT_TOKEN") and binding(self.env,"TELEGRAM_CHAT_ID") else "dashboard_only"},
                     "proposals":[{"id":p["id"],"state":p["state"],"digest":p["digest"],"details":json.loads(p["plan"]),"error":p["error_code"]} for p in proposals],
                     "opportunities":candidates,"ledger":await summary(store),
+                    "model_runs":await store.all("SELECT id,role,model,prompt_version,created_at,state,reserved_micro,actual_micro,error_code FROM model_runs ORDER BY created_at DESC LIMIT 20"),
                     "events":await store.all("SELECT id,kind,created_at,delivered_at,payload FROM events ORDER BY created_at DESC LIMIT 20"),
                     "reviews":[json.loads(r["data"]) for r in await store.all("SELECT data FROM reviews ORDER BY created_at DESC LIMIT 5")]})
             if request.method!="POST":

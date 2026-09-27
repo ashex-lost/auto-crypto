@@ -46,3 +46,14 @@ EXECUTOR_CONFIG_JSON 必需字段：
 验证读取、模拟、通知和批准阻断，再批准最小金额真实方案。完整核对后才开启定时运行。初始可考虑 5 分钟唤醒，来源默认每小时刷新；这是轮询，不承诺秒级抢名额，频率根据实际费用和时效调整。
 
 地区与账户资格由实际服务条款决定，不能通过更换服务器地区或借他人密钥自动解决。
+# 研究版本新增配置
+
+`migrations/0004_research.sql` 增加筛选结果和模型调用记录。已有数据库须按顺序迁移；回滚代码不会自动回滚数据库。
+
+- `model` 及 `input_usd_micro_per_million`、`output_usd_micro_per_million`：普通分析的模型和价格。
+- `review_model` 及同名 `review_` 价格字段：复盘模型和价格。
+- `analysis_max_call_usd_micro`、`review_max_call_usd_micro`：单次费用上限，默认 $0.05 和 $0.20；仍须满足总预算。
+- `review_enabled`：默认 false，启用后才安排每周 AI 复盘。
+- `research_principal_usd_micro`：默认参考 $100，只用于比较，不是用户本金、余额或投资授权。
+
+1 美元 = 1,000,000 微美元。默认普通分析 gpt-6-luna，复盘 gpt-6-sol，仅为配置起点，未验证谁最赚钱。使用标准非缓存 token 价格保守估算，最终以账单为准。参考 [Luna 官方页面](https://developers.openai.com/api/docs/models/gpt-6-luna) 和 [Sol 官方页面](https://developers.openai.com/api/docs/models/gpt-6-sol)。更换模型须同步核对价格和接口支持。模型资格、密钥、预算未配置时不发起付费请求。

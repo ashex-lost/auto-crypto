@@ -69,3 +69,8 @@ def json_object(text, limit=65536):
     if not isinstance(value, dict):
         raise Blocked("expected_object")
     return value
+def campaign_timestamp(value):
+    """Merkl supplies Unix seconds as decimal strings; reject floats and booleans."""
+    if isinstance(value,str) and value.isascii() and value.isdecimal() and len(value)<=11:
+        value=int(value)
+    return value if type(value) is int and 0<value<100_000_000_000 else None

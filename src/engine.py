@@ -5,10 +5,10 @@ from common import Blocked, canonical, now
 from config import settings
 from collector import discover,refresh_merkl
 from ai import analyze, review
-from policy import proposal
+from policy import proposal, prescreen, SCREENING_VERSION
 from execution import advance,executor
 from notifier import deliver
-from finance import reconcile_reservation, value_position, estimate, worth_review, summary
+from finance import reconcile_reservation, value_position, estimate, worth_review, summary, research_estimate
 from network import get_json
 
 
@@ -63,6 +63,11 @@ async def process_execution(env,store,paused=False):
 async def evaluate(env,store,s,candidate,analysis):
     # Recalculate once per day without paying to re-read unchanged rules.
     await store.run("UPDATE opportunities SET evaluation_due=? WHERE id=?",now()+86400,candidate["id"])
+    screened=prescreen(candidate)
+    if not screened['eligible_for_analysis']:
+        await store.run("UPDATE opportunities SET screening=?,screening_version=?,status='screened_out' WHERE id=?",
+                        canonical(screened),SCREENING_VERSION,candidate['id'])
+        return {'state':'screened','reasons':screened['reasons']}
     try:
         p=await proposal(store,s,candidate,analysis,preview_vault=partial(executor,env,"/preview"))
         await store.run("INSERT INTO proposals(id,opportunity_id,fingerprint,plan,digest,created_at,expires_at) VALUES(?,?,?,?,?,?,?)",
@@ -102,8 +107,16 @@ async def tick(env,store,cron=False):
             await store.run("UPDATE control SET next_discovery=?,discovery_page=(discovery_page+1)%10 WHERE id=1",t+s["discovery_seconds"])
             result=await discover(store,control["discovery_page"])
             return {"state":"discovered","sources":result}
-        candidate=await store.one("SELECT * FROM opportunities WHERE (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND status='discovered' ORDER BY CASE source WHEN 'binance' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1")
+        candidate=await store.one("SELECT * FROM opportunities WHERE (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND (status='discovered' OR (status='screened_out' AND COALESCE(screening_version,'')!=?)) ORDER BY CASE source WHEN 'binance' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1",SCREENING_VERSION)
         if candidate:
+            screened=prescreen(candidate,t)
+            screened['cost_estimate']=research_estimate(json.loads(candidate['data']),s)
+            screened['checked_at']=t
+            await store.run("UPDATE opportunities SET screening=?,screening_version=? WHERE id=?",
+                            canonical(screened),SCREENING_VERSION,candidate['id'])
+            if not screened['eligible_for_analysis']:
+                await store.run("UPDATE opportunities SET status='screened_out' WHERE id=?",candidate['id'])
+                return {'state':'screened','reasons':screened['reasons']}
             # Unknown API outcomes are NOT automatically resubmitted after a process restart.
             await store.run("UPDATE opportunities SET status='analyzing' WHERE id=?",candidate["id"])
             try:
@@ -117,7 +130,7 @@ async def tick(env,store,cron=False):
         cached=await store.one("SELECT * FROM opportunities WHERE analyzed_fingerprint=fingerprint AND analysis IS NOT NULL AND evaluation_due<=? AND observed_at>? ORDER BY evaluation_due LIMIT 1",t,t-86400)
         if cached:
             return await evaluate(env,store,s,cached,json.loads(cached["analysis"]))
-        if control["next_review"]<=t:
+        if s['review_enabled'] and control["next_review"]<=t:
             await store.run("UPDATE control SET next_review=? WHERE id=1",t+7*86400)
             ledger=await summary(store)
             ledger["positions"]=[{k:v for k,v in row.items() if k!='receipts'} for row in ledger["positions"][:5]]

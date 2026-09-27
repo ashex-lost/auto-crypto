@@ -100,7 +100,7 @@ class Rules(unittest.TestCase):
         self.assertIsNone(r['net_usd_micro'])
 
     def test_usage_includes_reasoning_output(self):
-        s=settings(SimpleNamespace());self.assertEqual(usage_cost({'input_tokens':1000,'output_tokens':2000},s),110000)
+        s=settings(SimpleNamespace());self.assertEqual(usage_cost({'input_tokens':1000,'output_tokens':2000},s),1100)
 
 
 class Persistence(unittest.IsolatedAsyncioTestCase):
@@ -123,7 +123,7 @@ class Persistence(unittest.IsolatedAsyncioTestCase):
         await self.store.run('UPDATE control SET paused=0,next_discovery=? WHERE id=1',now()+86400)
         advice={'conclusion':'No completed positions','continue_research':True,'proposed_changes':[], 'missing_evidence':['receipts']}
         with patch('engine.review',new=AsyncMock(return_value=advice)) as model:
-            result=await tick(SimpleNamespace(),self.store)
+            result=await tick(SimpleNamespace(SETTINGS_JSON='{"review_enabled":true}'),self.store)
         self.assertEqual(result['state'],'reviewed')
         report=model.await_args.args[3]
         self.assertEqual(report['ledger']['positions'],[])
