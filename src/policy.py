@@ -7,6 +7,8 @@ from finance import allocated_monthly_cost, estimate, worth_review
 async def proposal(store,s,opportunity,analysis,preview_vault):
     if opportunity["source"] == "binance":
         raise Blocked("binance_launchpool_execution_not_verified")
+    if opportunity["source"] != "merkl":
+        raise Blocked("task_executor_not_connected")
     data = json.loads(opportunity["data"])
     if data.get("status")!="LIVE" or int(data.get("earliestCampaignEnd") or 0)<=now():
         raise Blocked("campaign_not_live")
@@ -92,6 +94,14 @@ def prescreen(opportunity, timestamp=None):
     """No model/network/signing calls. A pass is permission to research, never to invest."""
     timestamp = now() if timestamp is None else timestamp
     data = json.loads(opportunity['data']) if isinstance(opportunity['data'], str) else opportunity['data']
+    if opportunity['source']=='task':
+        from tasks import assess_task
+        result=assess_task(data,timestamp)
+        observed=opportunity.get('observed_at',0)
+        if type(observed) is not int or observed>timestamp+300 or timestamp-observed>86400:
+            result['reasons'].append('source_stale')
+            result['eligible_for_analysis']=False
+        return {'version':SCREENING_VERSION,**result}
     reasons=[]
     observed=opportunity.get('observed_at',0)
     if type(observed) is not int or observed>timestamp+300 or timestamp-observed>86400:

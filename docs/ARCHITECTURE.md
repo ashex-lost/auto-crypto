@@ -79,3 +79,9 @@ Python Worker 每轮只做有界步骤，不使用常驻进程、线程、进程
 - [Binance 支持接口边界](https://developers.binance.com/en/docs/introduction)
 - [Binance 公共行情接口](https://developers.binance.com/en/docs/products/spot/rest-api)
 - [Astra API 规格](https://developers.openai.com/api/docs/models/gpt-6-astra)
+
+## 任务型研究分支
+
+任务证据 → tasks 固定筛选及成本缺口 → AI 核查 → 具体任务适配与批准单（待接通）→ 用户批准 → 受限执行（待接通）→ 实际到账复盘。
+
+现在任务筛选结果只用于研究。任务不能进入已有金库执行器；不会因为页面显示任务而自动发帖、登录或签名。邮箱通知适配仍待补充，现有通知实现不能当作邮件已接通。
