@@ -15,7 +15,7 @@ export default {
     const path=new URL(request.url).pathname;
     const owner=path.startsWith('/owner/');
     if(!await authorized(request,owner?env.OWNER_TOKEN:env.EXECUTION_TOKEN)) return json({error:'unauthorized'},401);
-    if(!['/preview','/advance','/state','/pause','/owner/check','/owner/resume','/owner/approve'].includes(path)) return json({error:'not_found'},404);
+    if(!['/preview','/advance','/state','/address','/pause','/owner/check','/owner/resume','/owner/approve'].includes(path)) return json({error:'not_found'},404);
     return env.WALLET.get(env.WALLET.idFromName('only-wallet')).fetch(request);
   }
 };

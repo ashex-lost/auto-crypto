@@ -12,6 +12,8 @@ from engine import tick
 from execution import approve,executor
 from finance import summary
 from dashboard import PAGE
+from readiness import check as readiness_check
+from task_handoff import evidence
 
 HEADERS={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"}
 
@@ -51,12 +53,27 @@ class Default(WorkerEntrypoint):
                     "last_success":control["last_success"],"last_cron":control["last_cron"],"error":control["error_code"],
                     "sources":await store.all("SELECT * FROM sources"),"model_key_connected":bool(binding(self.env,"MODEL_API_KEY")),
                     "model_access_confirmed":s["provider_eligible"],"reviewed_adapters":len(s["vaults"]),
-                    "notification_channel":"telegram" if binding(self.env,"TELEGRAM_BOT_TOKEN") and binding(self.env,"TELEGRAM_CHAT_ID") else "dashboard_only"},
+                    "notification_channel":"telegram" if binding(self.env,"TELEGRAM_BOT_TOKEN") and binding(self.env,"TELEGRAM_CHAT_ID") else ("email" if binding(self.env,"EMAIL_TO") and ((binding(self.env,"EMAIL_WEBHOOK_URL") and binding(self.env,"EMAIL_WEBHOOK_TOKEN")) or (binding(self.env,"EMAIL_API_KEY") and binding(self.env,"EMAIL_FROM"))) else "dashboard_only"),
                     "proposals":[{"id":p["id"],"state":p["state"],"digest":p["digest"],"details":json.loads(p["plan"]),"error":p["error_code"]} for p in proposals],
                     "opportunities":candidates,"ledger":await summary(store),
                     "model_runs":await store.all("SELECT id,role,model,prompt_version,created_at,state,reserved_micro,actual_micro,error_code FROM model_runs ORDER BY created_at DESC LIMIT 20"),
                     "events":await store.all("SELECT id,kind,created_at,delivered_at,payload FROM events ORDER BY created_at DESC LIMIT 20"),
-                    "reviews":[json.loads(r["data"]) for r in await store.all("SELECT data FROM reviews ORDER BY created_at DESC LIMIT 5")]})
+                    "reviews":[json.loads(r["data"]) for r in await store.all("SELECT data FROM reviews ORDER BY created_at DESC LIMIT 5")]}})
+            if request.method=="GET" and path=="/api/receiver":
+                rows=await store.all("SELECT observed_at,status,chain_id,address,native_raw,assets,error_code FROM receiver_snapshots ORDER BY observed_at DESC LIMIT 20")
+                for row in rows:
+                    if row.get("assets"):
+                        row["assets"]=json.loads(row["assets"])
+                return response({"configured":bool(binding(self.env,"RECEIVER_ADDRESS") and binding(self.env,"RECEIVER_RPC_URL") and binding(self.env,"RECEIVER_CHAIN_ID")),
+                                 "address":binding(self.env,"RECEIVER_ADDRESS") or None,"chain_id":binding(self.env,"RECEIVER_CHAIN_ID") or None,
+                                 "snapshots":rows})
+            if request.method=="GET" and path=="/api/task-handoffs":
+                rows=await store.all("SELECT id,opportunity_id,digest,plan,state,created_at,approved_at,completed_at,evidence FROM task_handoffs ORDER BY created_at DESC LIMIT 30")
+                for row in rows:
+                    row["plan"]=json.loads(row["plan"])
+                return response({"handoffs":rows})
+            if request.method=="GET" and path=="/api/readiness":
+                return response(await readiness_check(self.env, store))
             if request.method!="POST":
                 return response({"error":"not_found"},404)
             if request.headers.get("Content-Type","").split(";")[0]!="application/json":
@@ -82,6 +99,25 @@ class Default(WorkerEntrypoint):
                         await store.event("pause:unconfirmed","executor_pause_unconfirmed",{})
                 await store.audit("pause" if body["paused"] else "resume_research","control")
                 return response({"paused":body["paused"],"executor_paused":confirmed})
+            m=re.fullmatch(r"/api/task-handoffs/([a-f0-9]{64})/(approve|reject|complete)",path)
+            if m:
+                key,action=m.groups(); row=await store.one("SELECT * FROM task_handoffs WHERE id=?",key)
+                if not row or row["digest"]!=key: raise Blocked("task_handoff_not_found")
+                plan=json.loads(row["plan"])
+                if action=="reject":
+                    if body: raise Blocked("unknown_field")
+                    await store.run("UPDATE task_handoffs SET state='rejected' WHERE id=? AND state='pending_approval'",key)
+                    return response({"state":"rejected","id":key})
+                if body.get("digest")!=key: raise Blocked("task_handoff_digest_mismatch")
+                if action=="approve":
+                    if set(body)!={"digest"}: raise Blocked("invalid_task_handoff_approval")
+                    await store.run("UPDATE task_handoffs SET state='approved',approved_at=? WHERE id=? AND state='pending_approval'",now(),key)
+                    return response({"state":"approved","id":key,"plan":plan})
+                if set(body)!={"digest","evidence"}: raise Blocked("invalid_task_handoff_completion")
+                if row["state"]!="approved": raise Blocked("task_handoff_not_approved")
+                ev=evidence(body["evidence"])
+                await store.run("UPDATE task_handoffs SET state='completed',completed_at=?,evidence=? WHERE id=?",now(),ev,key)
+                return response({"state":"completed","id":key})
             m=re.fullmatch(r"/api/proposals/([a-f0-9]{64})/(approve|reject|resume)",path)
             if m:
                 key,action=m.groups()

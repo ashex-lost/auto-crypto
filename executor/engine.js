@@ -47,6 +47,7 @@ export class Executor {
       const body=JSON.parse(text);
       if(path==='/owner/check') return json({authorized:true});
       if(path==='/state') return json({paused:(await this.storage.get('paused'))!==false,plan:publicState(await this.storage.get('plan'))});
+      if(path==='/address') return json({address:this.wallet().address.toLowerCase()});
       if(path==='/pause') { await this.storage.put('paused',true); return json({paused:true}); }
       if(path==='/owner/resume') {
         this.config(); this.wallet();

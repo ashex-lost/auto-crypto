@@ -10,6 +10,8 @@ from execution import advance,executor
 from notifier import deliver
 from finance import reconcile_reservation, value_position, estimate, worth_review, summary, research_estimate
 from network import get_json
+from receiver import snapshot
+from task_handoff import prepare
 
 
 async def process_execution(env,store,paused=False):
@@ -68,6 +70,12 @@ async def evaluate(env,store,s,candidate,analysis):
         await store.run("UPDATE opportunities SET screening=?,screening_version=?,status='screened_out' WHERE id=?",
                         canonical(screened),SCREENING_VERSION,candidate['id'])
         return {'state':'screened','reasons':screened['reasons']}
+    if candidate["source"]=="task":
+        handoff=prepare({**json.loads(candidate["data"]),"title":candidate["title"],"url":candidate["url"]})
+        await store.run("INSERT OR IGNORE INTO task_handoffs(id,opportunity_id,digest,plan,state,created_at) VALUES(?,?,?,?,?,?)",
+                        handoff["id"],candidate["id"],handoff["digest"],canonical(handoff["plan"]),"pending_approval",now())
+        await store.event(handoff["id"]+":task_approval","task_handoff_approval_required",{"id":handoff["id"],"url":candidate["url"]})
+        return {"state":"task_handoff_approval","id":handoff["id"]}
     try:
         p=await proposal(store,s,candidate,analysis,preview_vault=partial(executor,env,"/preview"))
         await store.run("INSERT INTO proposals(id,opportunity_id,fingerprint,plan,digest,created_at,expires_at) VALUES(?,?,?,?,?,?,?)",
@@ -87,6 +95,16 @@ async def tick(env,store,cron=False):
     try:
         s=settings(env)
         control=await store.one("SELECT * FROM control WHERE id=1")
+        # Receiver is read-only and intentionally independent of signing/execution.
+        # A missing RPC or address becomes an observation, never a reason to stop research.
+        try:
+            observed=await snapshot(env)
+            await store.run("INSERT INTO receiver_snapshots(observed_at,status,chain_id,address,native_raw,assets) VALUES(?,?,?,?,?,?)",
+                            t,observed.get("status","unknown"),observed.get("chain_id"),observed.get("address"),
+                            observed.get("native_raw"),canonical(observed.get("assets",[])))
+        except Blocked as e:
+            await store.run("INSERT INTO receiver_snapshots(observed_at,status,error_code) VALUES(?,?,?)",
+                            t,"error",str(e))
         if s['monthly_fixed_usd_micro'] is not None and not control['paused']:
             from datetime import datetime,timezone
             month=datetime.fromtimestamp(t,timezone.utc).strftime('%Y-%m')

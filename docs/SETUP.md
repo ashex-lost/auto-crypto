@@ -1,5 +1,9 @@
 # 接入清单：审阅通过后使用，现在不部署
 
+## 部署后第一步
+
+认证打开控制台后先查看 `GET /api/readiness`，或页面中的“部署验收”。它必须显示数据库已迁移、令牌有效、系统保持暂停；没有必要时不配置模型预算、钱包适配器或通知。`ready_for_research` 不等于可以花钱，`ready_for_financial_execution` 也不替代每个方案的批准。
+
 最终需要两个 Cloudflare Workers、D1 数据库和签名 Worker 的 Durable Object。不需要在线聊天室，部署之后不依赖个人电脑持续开机。
 
 ## 主 Worker
@@ -8,7 +12,9 @@
 - MODEL_API_KEY：合法可用的模型 API 密钥，存 Secret；订阅不是通用 API 账户。
 - EXECUTION_TOKEN：两个 Worker 相同的内部调用令牌，与批准令牌不同，存 Secrets。
 - SETTINGS_JSON：预算、地区资格、活动配置；以私有配置/Secret 保存，不提交公开仓库。
-- TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID：选择 Telegram 后再接入；否则仅控制台事件。
+- TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID：选择 Telegram 后再接入；否则可使用邮箱 Webhook 或仅控制台事件。
+- 邮箱推送二选一：`EMAIL_API_KEY` + `EMAIL_FROM` + `EMAIL_TO` 使用 Resend；或 `EMAIL_WEBHOOK_URL` + `EMAIL_WEBHOOK_TOKEN` + `EMAIL_TO` 使用你自己的邮件 Webhook。只发送事件类型和控制台事件编号，不发送私钥、签名原文或完整钱包余额。
+- RECEIVER_ADDRESS / RECEIVER_CHAIN_ID / RECEIVER_RPC_URL / RECEIVER_ASSETS_JSON：只读接收器。地址是独立实验钱包公开地址，RPC 密钥只存 Secret；接收器只读余额，不签名。
 - DB：现有 D1 binding；EXECUTOR：指向独立执行器的 Service Binding。
 
 SETTINGS_JSON 的完整字段以 src/config.py 为准：费用/本金上限默认 0，固定托管和搜索数据费用默认未知，provider_eligible=false，vaults=[]。这不是可以开始花钱的默认配置。
@@ -23,6 +29,8 @@ costs_usd_micro 明确填写 trading/slippage/bridge/exit，可附 ai/opportunit
 - WALLET_PRIVATE_KEY：仅存签名 Worker Secret。使用独立实验钱包，不使用主钱包助记词，不发送到对话。
 - RPC_URL：选定链的 HTTPS RPC，含密钥时同样存 Secret。
 - EXECUTOR_CONFIG_JSON：独立限额与已审查合约名单，私有保存。
+
+钱包准备分两步：先在 MetaMask、Rabby 或硬件钱包中创建独立实验钱包并只抄下公开地址；再把私钥直接作为签名 Worker 的 Secret 保存。私钥不要发到聊天、GitHub、主 Worker 或邮件。接收器使用同一个公开地址监控余额，领取交易仍须经过方案批准。
 
 EXECUTOR_CONFIG_JSON 必需字段：
 
