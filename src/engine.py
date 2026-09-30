@@ -71,6 +71,11 @@ async def evaluate(env,store,s,candidate,analysis):
                         canonical(screened),SCREENING_VERSION,candidate['id'])
         return {'state':'screened','reasons':screened['reasons']}
     if candidate["source"]=="task":
+        if (analysis.get("recommendation") != "review" or analysis.get("automation") != "allowed"
+                or analysis.get("eligibility") != "confirmed" or analysis.get("borrowing_required") is not False
+                or screened.get("execution_blockers")):
+            await store.run("UPDATE opportunities SET status='task_review_needed' WHERE id=?",candidate["id"])
+            return {"state":"task_review_needed"}
         handoff=prepare({**json.loads(candidate["data"]),"title":candidate["title"],"url":candidate["url"]})
         await store.run("INSERT OR IGNORE INTO task_handoffs(id,opportunity_id,digest,plan,state,created_at) VALUES(?,?,?,?,?,?)",
                         handoff["id"],candidate["id"],handoff["digest"],canonical(handoff["plan"]),"pending_approval",now())
@@ -123,9 +128,11 @@ async def tick(env,store,cron=False):
         if control["next_discovery"]<=t:
             # Persist next due time before network I/O. A failed provider cannot create a tight paid loop.
             await store.run("UPDATE control SET next_discovery=?,discovery_page=(discovery_page+1)%10 WHERE id=1",t+s["discovery_seconds"])
-            result=await discover(store,control["discovery_page"])
-            return {"state":"discovered","sources":result}
-        candidate=await store.one("SELECT * FROM opportunities WHERE (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND (status='discovered' OR (status='screened_out' AND COALESCE(screening_version,'')!=?)) ORDER BY CASE source WHEN 'binance' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1",SCREENING_VERSION)
+            result=await discover(store,control["discovery_page"],env)
+            from galxe import check_next
+            checked = await check_next(env,store)
+            return {"state":"discovered","sources":result,"task_qualification":checked}
+        candidate=await store.one("SELECT * FROM opportunities WHERE (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND (status='discovered' OR (status='screened_out' AND COALESCE(screening_version,'')!=?)) ORDER BY CASE source WHEN 'task' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1",SCREENING_VERSION)
         if candidate:
             screened=prescreen(candidate,t)
             screened['cost_estimate']=research_estimate(json.loads(candidate['data']),s)

@@ -57,11 +57,19 @@ async def save_candidate(store, c):
         c["id"],c["source"],c["title"],c["url"],c["fingerprint"],canonical(c["data"]),now())
 
 
-async def discover(store, page=0):
+async def discover(store, page=0, env=None):
     results = {}
-    for source in ("binance","merkl"):
+    for source in ("galxe","binance","merkl"):
         try:
             candidates = []
+            if source == "galxe":
+                from galxe import discover as discover_tasks
+                result = await discover_tasks(env, store, page)
+                results[source] = result
+                if result["state"] == "not_configured":
+                    continue
+                await store.run("INSERT INTO sources(id,last_ok,observed_count) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_ok=excluded.last_ok,last_error=NULL,observed_count=excluded.observed_count",source,now(),result["count"])
+                continue
             if source == "binance":
                 parser = Announcements()
                 parser.feed(await request(BINANCE_LIST, max_bytes=2_000_000))

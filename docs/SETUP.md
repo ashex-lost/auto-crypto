@@ -65,3 +65,15 @@ EXECUTOR_CONFIG_JSON 必需字段：
 - `research_principal_usd_micro`：默认参考 $100，只用于比较，不是用户本金、余额或投资授权。
 
 1 美元 = 1,000,000 微美元。默认普通分析 gpt-6-luna，复盘 gpt-6-sol，仅为配置起点，未验证谁最赚钱。使用标准非缓存 token 价格保守估算，最终以账单为准。参考 [Luna 官方页面](https://developers.openai.com/api/docs/models/gpt-6-luna) 和 [Sol 官方页面](https://developers.openai.com/api/docs/models/gpt-6-sol)。更换模型须同步核对价格和接口支持。模型资格、密钥、预算未配置时不发起付费请求。
+
+## Galxe 任务活动（只读适配器）
+
+Galxe 的官方 Integration API 可以列出活动并查询某个公开地址的资格，但它是项目方 API，不是个人任务提交接口。程序只接入读取和资格快照；不会把访问令牌当成登录会话，也不会自动发帖、完成社交任务、解验证码或领取奖励。
+
+需要的私有配置：
+
+- `GALXE_ACCESS_TOKEN`：从 Galxe dashboard 的 Server API 生成，直接存主 Worker Secret；不要发到聊天或 GitHub。
+- `GALXE_SPACE_IDS_JSON`：要监控的官方 Space ID JSON 数组，例如 `["40"]`，作为私有变量保存。
+- `RECEIVER_ADDRESS`：独立实验钱包公开地址，用于资格查询；不要放私钥。
+
+程序会自动读取活动、检查状态/截止时间/人数上限，再按固定规则筛选；需要更深入资格查询时，控制台会出现“自动查询我的资格（不参与、不签名）”。这一步只保存资格快照，仍不会生成收益或执行方案。

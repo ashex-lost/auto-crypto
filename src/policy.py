@@ -73,7 +73,7 @@ async def proposal(store,s,opportunity,analysis,preview_vault):
                        "止损会触发退出尝试；合约故障、流动性或价格突变可能使损失超过阈值。"]}
 
 
-SCREENING_VERSION = 'research-v2'
+SCREENING_VERSION = 'research-v3'
 REASONS = {
     'source_stale': '资料超过一天未刷新，先更新再判断。',
     'campaign_not_live': '活动已结束或尚未开放。',

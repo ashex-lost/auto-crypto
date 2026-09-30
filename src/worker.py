@@ -14,6 +14,7 @@ from finance import summary
 from dashboard import PAGE
 from readiness import check as readiness_check
 from task_handoff import evidence
+from galxe import capabilities, check_eligibility
 
 HEADERS={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"}
 
@@ -59,6 +60,9 @@ class Default(WorkerEntrypoint):
                     "model_runs":await store.all("SELECT id,role,model,prompt_version,created_at,state,reserved_micro,actual_micro,error_code FROM model_runs ORDER BY created_at DESC LIMIT 20"),
                     "events":await store.all("SELECT id,kind,created_at,delivered_at,payload FROM events ORDER BY created_at DESC LIMIT 20"),
                     "reviews":[json.loads(r["data"]) for r in await store.all("SELECT data FROM reviews ORDER BY created_at DESC LIMIT 5")]})
+            if request.method=="GET" and path=="/api/adapters":
+                return response({"adapters":[capabilities(self.env)],
+                    "task_checks":await store.all("SELECT opportunity_id,checked_at,status,result FROM task_checks ORDER BY checked_at DESC LIMIT 20")})
             if request.method=="GET" and path=="/api/receiver":
                 rows=await store.all("SELECT observed_at,status,chain_id,address,native_raw,assets,error_code FROM receiver_snapshots ORDER BY observed_at DESC LIMIT 20")
                 for row in rows:
@@ -83,6 +87,10 @@ class Default(WorkerEntrypoint):
             if origin and origin != urlsplit(request.url).scheme+"://"+urlsplit(request.url).netloc:
                 return response({"error":"origin_rejected"},403)
             body=json_object(await request.text(),16384)
+            if path=="/api/adapters/galxe/check":
+                if set(body)!={"opportunity_id"} or not isinstance(body["opportunity_id"],str) or len(body["opportunity_id"])>110:
+                    raise Blocked("galxe_invalid_id")
+                return response(await check_eligibility(self.env,store,body["opportunity_id"]))
             if path=="/api/tick":
                 if body:
                     raise Blocked("unknown_field")

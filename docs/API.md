@@ -39,3 +39,12 @@ USD 预算单位为微美元：1 美元 = 1,000,000。链上 `*_raw` 为代币�
 `GET /api/status` 增加 `opportunities[].screening`（固定规则原因与参考成本测算）和 `model_runs`（最近 20 次调用的用途、模型、预留和估算实际费用、失败状态）。不返回模型输入快照或密钥。筛选通过不代表获批参与。
 
 `GET /api/readiness` 返回部署验收结果：数据库、令牌、设置、暂停状态、AI 预算、Service Binding、通知和适配器登记。它只读，不部署、不付款、不批准方案；`ready_for_research` 允许继续观察，`ready_for_financial_execution` 只有全部检查和已审查适配器都满足时才可能为 true。
+
+## Galxe 只读活动适配器
+
+| 接口 | 用途 |
+|---|---|
+| GET /api/adapters | 显示 Galxe 读取能力、配置状态和资格快照；不返回访问令牌 |
+| POST /api/adapters/galxe/check | body 为 `{"opportunity_id":"galxe:..."}`；只查询公开活动资格，不登录、不提交、不签名、不领取 |
+
+Galxe 需要官方访问令牌和监控钱包公开地址。令牌只存 Cloudflare Secret。接口可读取活动、状态、人数、截止时间和 `credentialGroups(address)` 资格；官方文档未提供用个人参与者身份完成任务或代领的通用接口，因此资格满足也不会自动记作收益。

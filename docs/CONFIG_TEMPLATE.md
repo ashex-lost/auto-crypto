@@ -34,3 +34,15 @@
 - `EXECUTOR_CONFIG_JSON`
 
 私钥只进入签名 Worker；主 Worker、模型、通知和接收器永远不需要私钥。
+
+## Galxe 只读任务研究
+
+主 Worker Secret：
+
+- `GALXE_ACCESS_TOKEN`
+
+主 Worker 私有变量：
+
+- `GALXE_SPACE_IDS_JSON`（例如 `["40"]`）
+
+这两个值只打开官方活动读取和公开地址资格查询，不打开任务提交、社交操作或领奖权限。
