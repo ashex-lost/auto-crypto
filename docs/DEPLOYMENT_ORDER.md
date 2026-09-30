@@ -16,3 +16,7 @@
 12. **优化与扩大**：只有复盘显示净收益为正、异常可恢复且人工介入下降，才考虑扩大活动数量或预算；扩大权限需重新批准。
 
 任何阶段出错，保持暂停并记录原因。回滚 GitHub 代码不能撤回已经广播的链上交易，也不会自动回滚 D1 数据。
+
+## 自动部署（2026-09-30）
+
+`.github/workflows/ci-deploy.yml`：每次推送和 PR 都跑全部测试和打包检查；只有合并到 `main` 才部署（先 D1 迁移、再签名 Worker、再主 Worker）。合并 PR 就是你对代码的批准。部署不写入任何 Secret，也不批准资金方案。需要在 GitHub 仓库的 Actions Secrets 中配置 `CLOUDFLARE_API_TOKEN`（只授予 Workers 脚本编辑 + D1 编辑权限）和 `CLOUDFLARE_ACCOUNT_ID`。`SETTINGS_JSON`、`EXECUTOR_CONFIG_JSON` 已从 wrangler 配置移出，改存 Cloudflare Secret；`keep_vars` 防止部署覆盖控制台里的值。

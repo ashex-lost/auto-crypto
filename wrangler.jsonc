@@ -14,5 +14,6 @@
     "migrations_dir": "migrations"
   }],
   "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"}],
-  "vars": {"SETTINGS_JSON": "{}"}
+  // SETTINGS_JSON is private: set it as a Secret, never here. keep_vars stops deploys from wiping dashboard values.
+  "keep_vars": true
 }

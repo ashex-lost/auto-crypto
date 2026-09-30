@@ -7,5 +7,5 @@
   "preview_urls":false,
   "durable_objects":{"bindings":[{"name":"WALLET","class_name":"WalletExecutor"}]},
   "migrations":[{"tag":"v1","new_sqlite_classes":["WalletExecutor"]}],
-  "vars":{"EXECUTOR_CONFIG_JSON":"{}"}
+  "keep_vars":true
 }
