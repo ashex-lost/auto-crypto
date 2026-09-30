@@ -47,6 +47,10 @@ async def proposal(store,s,opportunity,analysis,preview_vault):
     economics = estimate(principal,data["apr"],days,costs,friction.get("opportunity_cost",0))
     if not worth_review(economics,s["min_net_usd_micro"]):
         raise Blocked("net_return_below_threshold_or_cost_unknown")
+    ratio=economics["net_scenarios_usd_micro"]["conservative"]*10000//economics["worst_loss_usd_micro"]
+    economics["reward_to_worst_loss_bps"]=ratio
+    if s.get("min_reward_to_risk_bps",0) and ratio<s["min_reward_to_risk_bps"]:
+        raise Blocked("reward_to_risk_below_threshold")
     spent = await store.one("SELECT COALESCE(SUM(COALESCE(actual_micro,reserved_micro)),0) AS total FROM costs")
     if economics["worst_loss_usd_micro"]+spent["total"]>s["max_loss_usd_micro"]:
         raise Blocked("loss_budget_exhausted")
@@ -66,14 +70,29 @@ async def proposal(store,s,opportunity,analysis,preview_vault):
             "claim_until":t+(days+7)*86400,"max_claims":2,"max_txs":7,
             "min_claim_raw":str(v["min_claim_raw"]),"stop_loss_bps":integer(v["stop_loss_bps"],1,5000)}
     hash_value = digest(plan)
+    permissions=[
+        {"action":"approve","token":plan["asset"],"spender":plan["vault"],"amount_raw":plan["amount_raw"],
+         "unlimited":False,"revoked_after_deposit":True},
+        {"action":"erc4626_mint","contract":plan["vault"],"shares_raw":plan["shares_raw"],"receiver":plan["wallet"]},
+        {"action":"erc4626_redeem","contract":plan["vault"],"receiver":plan["wallet"],
+         "when":"exit_at, campaign end, or stop_loss_bps reached"},
+        {"action":"merkl_claim","contract":plan["distributor"],"receiver":plan["wallet"],"max_claims":plan["max_claims"]}]
+    summary={"金额_本金_usd":economics["principal_usd_micro"]/1e6,
+             "全部已知费用_usd":economics["total_known_cost_usd_micro"]/1e6,
+             "保守情景净收益_usd":economics["net_scenarios_usd_micro"]["conservative"]/1e6,
+             "最坏损失_usd":economics["worst_loss_usd_micro"]/1e6,
+             "链":plan["chain_id"],"合约":plan["vault"],"授权":"精确额度，存入后撤销，禁止无限授权",
+             "批准有效期至_unix":plan["expires_at"],"计划退出_unix":plan["exit_at"],"领取截止_unix":plan["claim_until"],
+             "退出规则":"到期、活动结束或亏损达到 stop_loss_bps 时尝试赎回；止损不是最大损失保证"}
     return {"id":hash_value,"plan":plan,"digest":hash_value,"economics":economics,"analysis":analysis,
+            "permissions":permissions,"summary":summary,
             "simulation":preview,"terms_evidence_url":v["terms_evidence_url"],
             "caveats":["仅支持一个经过核查的 ERC4626 金库及同种稳定币奖励；不支持借贷、跨链或任意兑换。",
                        "模拟是当前链状态的预检查，不保证未来成功；退出限价无法由标准 redeem 参数在链上锁定。",
                        "止损会触发退出尝试；合约故障、流动性或价格突变可能使损失超过阈值。"]}
 
 
-SCREENING_VERSION = 'research-v3'
+SCREENING_VERSION = 'research-v4'
 REASONS = {
     'source_stale': '资料超过一天未刷新，先更新再判断。',
     'campaign_not_live': '活动已结束或尚未开放。',
@@ -90,13 +109,13 @@ REASONS = {
 }
 
 
-def prescreen(opportunity, timestamp=None):
+def prescreen(opportunity, timestamp=None, s=None):
     """No model/network/signing calls. A pass is permission to research, never to invest."""
     timestamp = now() if timestamp is None else timestamp
     data = json.loads(opportunity['data']) if isinstance(opportunity['data'], str) else opportunity['data']
     if opportunity['source']=='task':
         from tasks import assess_task
-        result=assess_task(data,timestamp)
+        result=assess_task(data,timestamp,s)
         observed=opportunity.get('observed_at',0)
         if type(observed) is not int or observed>timestamp+300 or timestamp-observed>86400:
             result['reasons'].append('source_stale')

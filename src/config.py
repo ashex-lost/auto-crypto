@@ -3,6 +3,9 @@ import json
 from common import Blocked, integer
 
 
+ACCOUNT_KINDS=("binance","x","discord","telegram","evm_wallet","email","github")
+
+
 def binding(env, name, default=""):
     value = getattr(env, name, None)
     return default if value is None else value
@@ -38,6 +41,16 @@ def settings(env):
         "review_max_call_usd_micro": 200_000,
         "research_principal_usd_micro": 100_000_000,
         "review_enabled": False,
+        # Value of one hour of your manual time; None = unknown, so task net stays unknown.
+        "human_hour_usd_micro": None,
+        # Your real single accounts; requirements for an unavailable account block a task.
+        "accounts": {},
+        # Conservative net / worst loss, in basis points. 0 = shown but not enforced.
+        "min_reward_to_risk_bps": 0,
+        "report_days": 7,
+        # Raffles/points/unannounced rewards have no cash estimate. >0 allows a manual handoff only when
+        # cash cost is known to be zero and the estimated manual time is at most this many minutes.
+        "speculative_task_max_minutes": 0,
     }
     if not isinstance(s, dict) or set(s) - set(defaults):
         raise Blocked("settings_unknown_field")
@@ -58,6 +71,13 @@ def settings(env):
         if not isinstance(defaults[key],str) or not 1<=len(defaults[key])<=100:
             raise Blocked('model_config_invalid')
     integer(defaults['research_principal_usd_micro'],1)
+    integer(defaults['min_reward_to_risk_bps'],0,1_000_000)
+    integer(defaults['report_days'],1,31)
+    integer(defaults['speculative_task_max_minutes'],0,120)
+    accounts=defaults['accounts']
+    if not isinstance(accounts,dict) or set(accounts)-set(ACCOUNT_KINDS) or any(type(v) is not bool for v in accounts.values()):
+        raise Blocked('accounts_invalid')
+    defaults['accounts']={k:accounts.get(k,False) for k in ACCOUNT_KINDS}
     if len(defaults["vaults"]) > 10:
         raise Blocked("too_many_vaults")
     return defaults

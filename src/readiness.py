@@ -34,6 +34,11 @@ async def check(env, store):
     add("execution_token", execution_secrets, "internal executor token present" if execution_secrets else "not configured")
     receiver_configured = bool(binding(env, "RECEIVER_ADDRESS") and binding(env, "RECEIVER_RPC_URL") and binding(env, "RECEIVER_CHAIN_ID"))
     add("receiver", receiver_configured, "read-only receiver configured" if receiver_configured else "wallet receiver not configured")
+    add("loss_cap", s.get("max_loss_usd_micro", 0) > 0, "cumulative loss cap set (includes AI/API/hosting)" if s.get("max_loss_usd_micro", 0) > 0 else "max_loss_usd_micro is 0; nothing can be spent")
+    add("profile", bool(s.get("participant_region")) and any((s.get("accounts") or {}).values()),
+        "region and real single accounts declared" if s.get("participant_region") else "set participant_region and accounts so eligibility can be checked")
+    add("human_time_value", s.get("human_hour_usd_micro") is not None,
+        "manual time is priced" if s.get("human_hour_usd_micro") is not None else "human_hour_usd_micro unknown; fixed-reward tasks keep net unknown")
     blockers = [c["name"] for c in checks if not c["ok"]]
     research_blockers = {"database", "admin_token", "settings", "safe_start", "ai_budget"}
     return {"ready_for_research": not any(x in research_blockers for x in blockers),

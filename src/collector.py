@@ -7,6 +7,25 @@ from network import request, get_json
 
 BINANCE_LIST = "https://www.binance.com/en/support/announcement/new-cryptocurrency-listing?c=48&navId=48"
 MERKL_LIST = "https://api.merkl.xyz/v4/opportunities"
+# Public CMS listing used by Binance's own announcement pages (48 = new listings, 93 = latest activities).
+BINANCE_CMS = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=20&catalogId="
+BINANCE_CATALOGS = (48, 93)
+BINANCE_KEYWORDS = re.compile(r"launchpool|hodler airdrop|megadrop|airdrop|launchpad", re.I)
+
+
+def binance_articles(value):
+    """Validate the CMS JSON shape and return (url,title,release_ms). Unknown shape is an error, not empty."""
+    if not isinstance(value, dict) or value.get("success") is not True:
+        raise Blocked("binance_schema_changed")
+    catalogs = (value.get("data") or {}).get("catalogs")
+    if not isinstance(catalogs, list) or not catalogs or not isinstance(catalogs[0].get("articles"), list):
+        raise Blocked("binance_schema_changed")
+    out = []
+    for a in catalogs[0]["articles"][:50]:
+        code, title = a.get("code"), a.get("title")
+        if isinstance(code, str) and re.fullmatch(r"[0-9a-f]{32}", code) and isinstance(title, str):
+            out.append(("https://www.binance.com/en/support/announcement/detail/" + code, title[:240], a.get("releaseDate")))
+    return out
 
 
 class Announcements(HTMLParser):
@@ -71,16 +90,25 @@ async def discover(store, page=0, env=None):
                 await store.run("INSERT INTO sources(id,last_ok,observed_count) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_ok=excluded.last_ok,last_error=NULL,observed_count=excluded.observed_count",source,now(),result["count"])
                 continue
             if source == "binance":
-                parser = Announcements()
-                parser.feed(await request(BINANCE_LIST, max_bytes=2_000_000))
-                if not parser.links:
-                    raise Blocked("binance_listing_unreadable")
-                for url,title in dict(parser.links).items():
-                    if "launchpool" not in title.lower():
+                links = []
+                try:
+                    for catalog in BINANCE_CATALOGS:
+                        links += binance_articles(await get_json(BINANCE_CMS + str(catalog), max_bytes=400000))
+                except Blocked:
+                    # Fallback: static page links (often blocked for server IPs).
+                    parser = Announcements()
+                    parser.feed(await request(BINANCE_LIST, max_bytes=2_000_000))
+                    if not parser.links:
+                        raise Blocked("binance_listing_unreadable")
+                    links = [(u, t, None) for u, t in parser.links]
+                for url, title, released in {u: (u, t, r) for u, t, r in links}.values():
+                    if not BINANCE_KEYWORDS.search(title):
                         continue
-                    data = {"title":title,"official_url":url,"execution":"unverified_official_subscription_api"}
+                    data = {"title":title,"official_url":url,"released_ms":released,
+                            "execution":"unverified_official_subscription_api"}
+                    rules = {k: v for k, v in data.items() if k != "released_ms"}
                     candidates.append({"id":"binance:"+url.rsplit("/",1)[1],"source":source,"title":title,
-                                       "url":url,"fingerprint":digest(data),"data":data})
+                                       "url":url,"fingerprint":digest(rules),"data":data})
             else:
                 data = await get_json(MERKL_LIST+f"?items=10&page={page}",max_bytes=600000)
                 if not isinstance(data,list):

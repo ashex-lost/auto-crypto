@@ -86,6 +86,7 @@ async def summary(store):
     if complete and total_count['n']<=50:
         estimate=sum(p['market_valuation']['net_before_shared_operating_costs_usdt_micro'] for p in positions)-sum(c['accounted_micro'] for c in costs)
     return {"as_of":now(),"costs":costs,"risk_reservations_not_expenses":reserves,"positions":positions,
+             "realized":await realized(store),
              "net_usd_micro":None,"net_usdt_micro_estimate":estimate,
              "note":"链上数量由回执确认。市场估值使用记录时现货价，运行费按美元≈USDT估算；未结算仓位、未兑现奖励不算已实现利润。固定费及不确定账单保守按预留额扣除，最终美元净收益仍待账单核对。"}
 
@@ -170,3 +171,97 @@ def research_estimate(data, s):
     return {'state':'research_only','reference_principal_not_investment':True,
             'participation_approved':False,'economics':result,
             'note':'只用于比较活动；尚无钱包预览及完整费用，不能据此判定值得参与。APR 可能包含不同来源收益。'}
+
+
+# Realized results: only what actually arrived, minus every recorded cost (AI/API/hosting included).
+def income_entry(body, timestamp):
+    """Validate a user-recorded receipt. Pools, points and APR are not receipts."""
+    from common import Blocked as B
+    allowed={"source_ref","opportunity_id","asset","amount_raw","decimals","usd_micro","price_basis","tx_hash","evidence","received_at"}
+    if not isinstance(body,dict) or set(body)-allowed or not {"source_ref","asset","amount_raw","decimals","usd_micro","price_basis"}<=set(body):
+        raise B("income_invalid")
+    amount=str(body["amount_raw"])
+    if not amount.isdecimal() or len(amount)>78 or int(amount)<=0:
+        raise B("income_amount_invalid")
+    integer(body["decimals"],0,36); integer(body["usd_micro"],0,10**12)
+    if body["price_basis"] not in ("stablecoin_1usd","exchange_sale_record","spot_at_receipt"):
+        raise B("income_price_basis_invalid")
+    tx=body.get("tx_hash")
+    import re
+    if tx is not None and not re.fullmatch(r"0x[0-9a-fA-F]{64}",str(tx)):
+        raise B("income_tx_hash_invalid")
+    if tx is None and not body.get("evidence"):
+        raise B("income_evidence_required")
+    received=body.get("received_at",timestamp)
+    integer(received,1,timestamp+300)
+    for k in ("source_ref","asset","opportunity_id","evidence"):
+        if body.get(k) is not None and (not isinstance(body[k],str) or len(body[k])>(2000 if k=="evidence" else 120)):
+            raise B("income_invalid")
+    return {"source_ref":body["source_ref"],"opportunity_id":body.get("opportunity_id"),"asset":body["asset"],
+            "amount_raw":amount,"decimals":body["decimals"],"usd_micro":body["usd_micro"],
+            "price_basis":body["price_basis"],"tx_hash":tx.lower() if tx else None,
+            "evidence":body.get("evidence"),"received_at":received}
+
+
+MANUAL_COST_CATEGORIES=("gas","trading","slippage","bridge","exit","claim","ai","search_data","hosting","other")
+
+
+def cost_entry(body, timestamp):
+    from common import Blocked as B
+    allowed={"category","usd_micro","opportunity_id","tx_hash","evidence"}
+    if not isinstance(body,dict) or set(body)-allowed or not {"category","usd_micro"}<=set(body):
+        raise B("cost_invalid")
+    if body["category"] not in MANUAL_COST_CATEGORIES:
+        raise B("cost_category_invalid")
+    integer(body["usd_micro"],1,10**12)
+    if not body.get("tx_hash") and not body.get("evidence"):
+        raise B("cost_evidence_required")
+    for k in ("opportunity_id","tx_hash","evidence"):
+        if body.get(k) is not None and (not isinstance(body[k],str) or len(body[k])>2000):
+            raise B("cost_invalid")
+    return body
+
+
+async def realized(store):
+    """实际到账收入 - 实际/预留费用。预留费用在账单核对前按上限计入，偏保守。"""
+    income=await store.one("SELECT COALESCE(SUM(usd_micro),0) AS n,COUNT(*) AS c FROM income")
+    costs=await store.one("SELECT COALESCE(SUM(COALESCE(actual_micro,reserved_micro)),0) AS n FROM costs WHERE category!='capital_and_fee_reservation'")
+    risk=await store.one("SELECT COALESCE(SUM(reserved_micro),0) AS n FROM costs WHERE category='capital_and_fee_reservation' AND state='reserved'")
+    return {"income_usd_micro":income["n"],"income_records":income["c"],"costs_usd_micro":costs["n"],
+            "realized_net_usd_micro":income["n"]-costs["n"],
+            "open_risk_reservation_usd_micro":risk["n"],
+            "basis":"实际到账收入 - 全部已记录费用（含 AI/API/托管；未核对账单按预留额）。积分、奖池、APR、未领取奖励均不计入。"}
+
+
+async def metrics(store, since=0):
+    """Deterministic efficiency report; no model call. Used by dashboard, email report and AI review."""
+    funnel=await store.all("""SELECT CASE WHEN id LIKE 'galxe:%' THEN 'galxe' ELSE source END AS source,
+        COUNT(*) AS discovered,
+        SUM(CASE WHEN status NOT IN ('discovered','screened_out') THEN 1 ELSE 0 END) AS passed_rules,
+        SUM(CASE WHEN analysis IS NOT NULL THEN 1 ELSE 0 END) AS ai_analyzed
+        FROM opportunities GROUP BY 1""")
+    handoffs=await store.all("SELECT state,COUNT(*) AS n FROM task_handoffs GROUP BY state")
+    proposals=await store.all("SELECT state,COUNT(*) AS n FROM proposals GROUP BY state")
+    models=await store.all("""SELECT role,model,COUNT(*) AS calls,SUM(COALESCE(actual_micro,reserved_micro)) AS cost_usd_micro,
+        SUM(CASE WHEN state='completed' THEN 1 ELSE 0 END) AS completed FROM model_runs WHERE created_at>=? GROUP BY role,model""",since)
+    costs=await store.all("""SELECT category,SUM(COALESCE(actual_micro,reserved_micro)) AS usd_micro,
+        SUM(CASE WHEN state='confirmed' THEN 0 ELSE 1 END) AS unreconciled FROM costs
+        WHERE category!='capital_and_fee_reservation' AND created_at>=? GROUP BY category""",since)
+    people=await store.one("SELECT COUNT(*) AS n,COALESCE(SUM(minutes),0) AS minutes FROM interventions WHERE at>=?",since)
+    by_activity=await store.all("""SELECT opportunity_id,SUM(usd_micro) AS income_usd_micro,COUNT(*) AS receipts
+        FROM income WHERE received_at>=? GROUP BY opportunity_id ORDER BY 2 DESC LIMIT 20""",since)
+    activity_costs=await store.all("""SELECT opportunity_id,SUM(COALESCE(actual_micro,reserved_micro)) AS cost_usd_micro
+        FROM costs WHERE opportunity_id IS NOT NULL AND created_at>=? GROUP BY opportunity_id""",since)
+    cost_map={r["opportunity_id"]:r["cost_usd_micro"] for r in activity_costs}
+    per_activity=[{**r,"direct_cost_usd_micro":cost_map.get(r["opportunity_id"],0),
+                   "direct_net_usd_micro":r["income_usd_micro"]-cost_map.get(r["opportunity_id"],0)} for r in by_activity]
+    total=await realized(store)
+    ai_total=sum(m["cost_usd_micro"] or 0 for m in models)
+    minutes=people["minutes"]
+    return {"since":since,"as_of":now(),"funnel":funnel,"task_handoffs":handoffs,"funding_proposals":proposals,
+            "model_usage":models,"costs_by_category":costs,
+            "human_interventions":people["n"],"human_minutes_reported":minutes,
+            "per_activity":per_activity,"realized":total,
+            "net_per_human_hour_usd_micro":(total["realized_net_usd_micro"]*60//minutes) if minutes else None,
+            "ai_cost_per_handoff_usd_micro":(ai_total//max(1,sum(h["n"] for h in handoffs))) if handoffs else None,
+            "note":"只统计已记录数据；没有到账记录时净收益就是负的费用，不代表活动一定亏损或盈利。"}

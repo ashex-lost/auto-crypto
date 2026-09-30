@@ -10,7 +10,7 @@ from config import binding, settings
 from storage import Store
 from engine import tick
 from execution import approve,executor
-from finance import summary
+from finance import summary, metrics, income_entry, cost_entry
 from dashboard import PAGE
 from readiness import check as readiness_check
 from task_handoff import evidence
@@ -23,6 +23,12 @@ def auth(header,secret):
     if not isinstance(secret,str) or not 32<=len(secret)<=256 or not isinstance(header,str) or len(header)>300:
         return False
     return hmac.compare_digest(hashlib.sha256(header.encode()).digest(),hashlib.sha256(("Bearer "+secret).encode()).digest())
+
+
+async def intervened(store,kind,target=None,opportunity_id=None,minutes=None):
+    """Every human action is counted so reviews can measure how much automation actually saves."""
+    await store.run("INSERT INTO interventions(at,kind,target,opportunity_id,minutes) VALUES(?,?,?,?,?)",
+                    now(),kind,target,opportunity_id,minutes)
 
 
 def response(data,status=200):
@@ -76,6 +82,8 @@ class Default(WorkerEntrypoint):
                 for row in rows:
                     row["plan"]=json.loads(row["plan"])
                 return response({"handoffs":rows})
+            if request.method=="GET" and path=="/api/metrics":
+                return response(await metrics(store))
             if request.method=="GET" and path=="/api/readiness":
                 return response(await readiness_check(self.env, store))
             if request.method!="POST":
@@ -91,6 +99,21 @@ class Default(WorkerEntrypoint):
                 if set(body)!={"opportunity_id"} or not isinstance(body["opportunity_id"],str) or len(body["opportunity_id"])>110:
                     raise Blocked("galxe_invalid_id")
                 return response(await check_eligibility(self.env,store,body["opportunity_id"]))
+            if path=="/api/ledger/income":
+                entry=income_entry(body,now())
+                key=digest(entry)
+                await store.run("INSERT OR IGNORE INTO income(id,source_ref,opportunity_id,asset,amount_raw,decimals,usd_micro,price_basis,tx_hash,evidence,received_at,recorded_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                                key,entry["source_ref"],entry["opportunity_id"],entry["asset"],entry["amount_raw"],entry["decimals"],
+                                entry["usd_micro"],entry["price_basis"],entry["tx_hash"],entry["evidence"],entry["received_at"],now())
+                await intervened(store,"record_income",key,entry["opportunity_id"])
+                return response({"recorded":key,"realized":(await summary(store))["realized"]})
+            if path=="/api/ledger/cost":
+                entry=cost_entry(body,now()); key="manual:"+digest(entry)
+                await store.run("INSERT OR IGNORE INTO costs(id,category,reserved_micro,actual_micro,state,created_at,evidence,opportunity_id) VALUES(?,?,?,?,?,?,?,?)",
+                                key,entry["category"],entry["usd_micro"],entry["usd_micro"],"confirmed",now(),
+                                canonical({"tx_hash":entry.get("tx_hash"),"evidence":entry.get("evidence"),"basis":"user_recorded_actual"}),entry.get("opportunity_id"))
+                await intervened(store,"record_cost",key,entry.get("opportunity_id"))
+                return response({"recorded":key,"realized":(await summary(store))["realized"]})
             if path=="/api/tick":
                 if body:
                     raise Blocked("unknown_field")
@@ -106,6 +129,7 @@ class Default(WorkerEntrypoint):
                     except Blocked:
                         await store.event("pause:unconfirmed","executor_pause_unconfirmed",{})
                 await store.audit("pause" if body["paused"] else "resume_research","control")
+                await intervened(store,"pause" if body["paused"] else "resume","control")
                 return response({"paused":body["paused"],"executor_paused":confirmed})
             m=re.fullmatch(r"/api/task-handoffs/([a-f0-9]{64})/(approve|reject|complete)",path)
             if m:
@@ -115,16 +139,22 @@ class Default(WorkerEntrypoint):
                 if action=="reject":
                     if body: raise Blocked("unknown_field")
                     await store.run("UPDATE task_handoffs SET state='rejected' WHERE id=? AND state='pending_approval'",key)
+                    await intervened(store,"task_reject",key,row["opportunity_id"])
                     return response({"state":"rejected","id":key})
                 if body.get("digest")!=key: raise Blocked("task_handoff_digest_mismatch")
                 if action=="approve":
                     if set(body)!={"digest"}: raise Blocked("invalid_task_handoff_approval")
                     await store.run("UPDATE task_handoffs SET state='approved',approved_at=? WHERE id=? AND state='pending_approval'",now(),key)
+                    await intervened(store,"task_approve",key,row["opportunity_id"])
                     return response({"state":"approved","id":key,"plan":plan})
-                if set(body)!={"digest","evidence"}: raise Blocked("invalid_task_handoff_completion")
+                if not {"digest","evidence"}<=set(body) or set(body)-{"digest","evidence","minutes"}: raise Blocked("invalid_task_handoff_completion")
                 if row["state"]!="approved": raise Blocked("task_handoff_not_approved")
                 ev=evidence(body["evidence"])
+                minutes=body.get("minutes")
+                if minutes is not None and (type(minutes) is not int or not 0<=minutes<=1440): raise Blocked("task_minutes_invalid")
                 await store.run("UPDATE task_handoffs SET state='completed',completed_at=?,evidence=? WHERE id=?",now(),ev,key)
+                await store.run("UPDATE opportunities SET status='task_done_waiting_reward' WHERE id=?",row["opportunity_id"])
+                await intervened(store,"task_complete",key,row["opportunity_id"],minutes)
                 return response({"state":"completed","id":key})
             m=re.fullmatch(r"/api/proposals/([a-f0-9]{64})/(approve|reject|resume)",path)
             if m:
@@ -139,6 +169,7 @@ class Default(WorkerEntrypoint):
                     if not changed:
                         raise Blocked("proposal_not_rejectable")
                     await store.audit("reject",key,p["digest"])
+                    await intervened(store,"proposal_reject",key,p["opportunity_id"])
                     return response({"state":"rejected"})
                 if set(body)!={"digest","owner_token"} or body["digest"]!=p["digest"]:
                     raise Blocked("approval_digest_mismatch")
@@ -154,6 +185,7 @@ class Default(WorkerEntrypoint):
                         raise Blocked('approval_not_confirmed')
                     await executor(self.env,'/owner/resume',{'id':key},body['owner_token'])
                     await store.audit('user_resumed',key,p['digest'])
+                    await intervened(store,"proposal_resume",key,p["opportunity_id"])
                     return response({'state':'resumed','id':key})
                 if p["state"]!="pending_approval" or p["expires_at"]<=now():
                     raise Blocked("proposal_not_approvable")
@@ -184,6 +216,7 @@ class Default(WorkerEntrypoint):
                 if not result[1]["results"]:
                     raise Blocked("approval_conflict_or_loss_limit")
                 await store.audit("user_approved",key,p["digest"])
+                await intervened(store,"proposal_approve",key,p["opportunity_id"])
                 try:
                     result=await approve(self.env,details["plan"],body["owner_token"])
                     await executor(self.env,"/owner/resume",{'id':key},body["owner_token"])

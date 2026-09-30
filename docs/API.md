@@ -48,3 +48,16 @@ USD 预算单位为微美元：1 美元 = 1,000,000。链上 `*_raw` 为代币�
 | POST /api/adapters/galxe/check | body 为 `{"opportunity_id":"galxe:..."}`；只查询公开活动资格，不登录、不提交、不签名、不领取 |
 
 Galxe 需要官方访问令牌和监控钱包公开地址。令牌只存 Cloudflare Secret。接口可读取活动、状态、人数、截止时间和 `credentialGroups(address)` 资格；官方文档未提供用个人参与者身份完成任务或代领的通用接口，因此资格满足也不会自动记作收益。
+
+## 实际收益、费用与效率（2026-09-30 新增）
+
+| 接口 | 用途 |
+|---|---|
+| GET /api/metrics | 确定性复盘：来源漏斗、交接单和资金方案状态、模型按用途/型号的调用和费用、各类费用、人工介入次数和分钟、每活动直接净收益、已实现净收益、每人工小时净收益 |
+| POST /api/ledger/income | 登记真实到账：`source_ref`、`asset`、`amount_raw`、`decimals`、`usd_micro`、`price_basis`（`stablecoin_1usd`/`exchange_sale_record`/`spot_at_receipt`），必须有 `tx_hash` 或 `evidence`；可附 `opportunity_id`、`received_at` |
+| POST /api/ledger/cost | 登记真实费用：`category`（gas/trading/slippage/bridge/exit/claim/ai/search_data/hosting/other）、`usd_micro`，必须有 `tx_hash` 或 `evidence`；计入亏损上限 |
+| POST /api/task-handoffs/{id}/complete | 现在可额外提交 `minutes`（实际人工用时，0–1440） |
+
+已实现净收益 = 实际到账收入 − 全部已记录费用（AI/API/托管、Gas 等；未核对账单按预留额）。积分、奖池、APR、未领取奖励不计入。累计“费用 + 未释放风险预留 − 到账”达到 `max_loss_usd_micro` 时自动暂停并发邮件。
+
+所有人工操作（批准、拒绝、恢复、交接完成、登记收支、暂停/恢复）都会写入 `interventions`，用于统计人工介入次数。
