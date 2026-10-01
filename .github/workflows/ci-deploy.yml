@@ -47,3 +47,16 @@ jobs:
       - run: pnpm exec wrangler d1 migrations apply auto-crypto-sim --remote
       - run: pnpm exec wrangler deploy --config executor/wrangler.jsonc
       - run: uv run pywrangler deploy
+      # Private runtime config lives in GitHub Actions secrets and is copied to Worker secrets; never in the repo.
+      - name: Push runtime secrets
+        env:
+          SETTINGS_JSON: ${{ secrets.SETTINGS_JSON }}
+          EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+        run: |
+          umask 077
+          python3 -c "import json,os;print(json.dumps({k:os.environ[k] for k in ('SETTINGS_JSON','EMAIL_API_KEY','EMAIL_FROM','EMAIL_TO','DASHBOARD_URL') if os.environ.get(k)}))" > "$RUNNER_TEMP/s.json"
+          if [ "$(cat "$RUNNER_TEMP/s.json")" != "{}" ]; then pnpm exec wrangler secret bulk "$RUNNER_TEMP/s.json" --name auto-crypto-simulation; fi
+          rm -f "$RUNNER_TEMP/s.json"

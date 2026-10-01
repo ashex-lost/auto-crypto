@@ -15,6 +15,6 @@
   }],
   "ai": {"binding": "AI"},
   "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"}],
-  // SETTINGS_JSON is private: set it as a Secret, never here. keep_vars stops deploys from wiping dashboard values.
-  "keep_vars": true
+  // No plain vars: SETTINGS_JSON and email settings are pushed as Worker secrets from GitHub Actions secrets.
+  "keep_vars": false
 }

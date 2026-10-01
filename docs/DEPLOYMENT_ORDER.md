@@ -19,4 +19,4 @@
 
 ## 自动部署（2026-09-30）
 
-`.github/workflows/ci-deploy.yml`：每次推送和 PR 都跑全部测试和打包检查；只有合并到 `main` 才部署（先 D1 迁移、再签名 Worker、再主 Worker）。合并 PR 就是你对代码的批准。部署不写入任何 Secret，也不批准资金方案。需要在 GitHub 仓库的 Actions Secrets 中配置 `CLOUDFLARE_API_TOKEN`（只授予 Workers 脚本编辑 + D1 编辑权限）和 `CLOUDFLARE_ACCOUNT_ID`。`SETTINGS_JSON`、`EXECUTOR_CONFIG_JSON` 已从 wrangler 配置移出，改存 Cloudflare Secret；`keep_vars` 防止部署覆盖控制台里的值。
+`.github/workflows/ci-deploy.yml`：每次推送和 PR 都跑全部测试和打包检查；只有合并到 `main` 才部署（先 D1 迁移、再签名 Worker、再主 Worker）。合并 PR 就是你对代码的批准。部署不写入任何 Secret，也不批准资金方案。需要在 GitHub 仓库的 Actions Secrets 中配置 `CLOUDFLARE_API_TOKEN`（只授予 Workers 脚本编辑 + D1 编辑权限）和 `CLOUDFLARE_ACCOUNT_ID`。主 Worker 不再有明文变量：`SETTINGS_JSON`、`EMAIL_API_KEY`、`EMAIL_FROM`、`EMAIL_TO`、`DASHBOARD_URL` 存在 GitHub Actions Secrets，部署后自动写入 Worker Secret。
