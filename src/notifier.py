@@ -44,6 +44,11 @@ def compose(row,dashboard=""):
                "活动漏斗："+json.dumps(p.get("funnel",[]),ensure_ascii=False)[:800],
                "模型用量："+json.dumps(p.get("model_usage",[]),ensure_ascii=False)[:800]]
         return "Auto Crypto 定期复盘","\n".join(lines)+tail
+    if kind=="binance_announcements":
+        lines=["Binance 新的空投/Launchpool 类公告（只是线索，规则以官方页面为准；系统不会自动参与）："]
+        lines+=["- "+str(i.get("title",""))[:200]+"\n  "+str(i.get("url","")) for i in p.get("items",[])[:10]]
+        lines+=["","用你本人唯一的 Binance 账户查看；需要投入资金的活动请先在控制台生成方案再决定。"]
+        return "Auto Crypto：Binance 新活动公告","\n".join(lines)+tail
     if kind=="receiver_balance_increased":
         return "Auto Crypto 检测到钱包入账","实验钱包余额增加。请在控制台核对来源；如果是奖励，请登记到账记录。系统不会自动记为收入。"+tail
     return "Auto Crypto 需要处理："+kind,"Auto Crypto："+kind+"。请打开你的控制台查看。"+tail

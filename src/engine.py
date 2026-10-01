@@ -19,7 +19,8 @@ REPORT_KIND='periodic_report'
 
 
 def model_ready(env,s):
-    return s["provider_eligible"] is True and bool(binding(env,"MODEL_API_KEY")) and s["monthly_ai_usd_micro"]>0
+    connected=getattr(env,"AI",None) is not None if s.get("provider")=="workers_ai" else bool(binding(env,"MODEL_API_KEY"))
+    return s["provider_eligible"] is True and connected and s["monthly_ai_usd_micro"]>0
 
 
 async def process_execution(env,store,paused=False):
@@ -79,6 +80,9 @@ def task_facts(data,analysis):
     fill('requires_public_post',analysis.get('requires_public_post'))
     fill('requires_accounts',analysis.get('required_accounts'))
     fill('human_minutes',analysis.get('estimated_human_minutes'))
+    if analysis.get('deadline_unix'): fill('ends_at',analysis['deadline_unix'])
+    if merged.get('reward_kind') in (None,'unannounced') and analysis.get('reward_kind') in ('raffle','points'):
+        merged['reward_kind']=analysis['reward_kind']; estimated.append('reward_kind')
     if analysis.get('requires_funds') is False:
         fill('requires_deposit',False); fill('requires_trading',False)
     costs=dict(merged.get('costs_usd_micro') or {})

@@ -114,8 +114,16 @@ async def discover(store, page=0, env=None):
                 if not isinstance(data,list):
                     raise Blocked("merkl_schema_changed")
                 candidates = [merkl_candidate(row) for row in data if row.get("status")=="LIVE"]
+            fresh=[]
             for candidate in candidates[:10]:
+                if source=="binance" and not await store.one("SELECT 1 AS x FROM opportunities WHERE id=?",candidate["id"]):
+                    released=candidate["data"].get("released_ms")
+                    if type(released) is not int or released>=(now()-14*86400)*1000:
+                        fresh.append({"title":candidate["title"],"url":candidate["url"]})
                 await save_candidate(store,candidate)
+            if fresh:
+                # Rules live on Binance's page (detail API is robots-disallowed): a digest for you to read, not a plan.
+                await store.event("binance:"+digest(fresh)[:24],"binance_announcements",{"items":fresh})
             await store.run("INSERT INTO sources(id,last_ok,observed_count) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_ok=excluded.last_ok,last_error=NULL,observed_count=excluded.observed_count",source,now(),len(candidates))
             results[source] = {"count":len(candidates)}
         except Blocked as error:

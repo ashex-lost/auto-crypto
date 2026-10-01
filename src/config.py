@@ -51,6 +51,8 @@ def settings(env):
         # Raffles/points/unannounced rewards have no cash estimate. >0 allows a manual handoff only when
         # cash cost is known to be zero and the estimated manual time is at most this many minutes.
         "speculative_task_max_minutes": 0,
+        # "workers_ai" uses the Cloudflare AI binding (no external key); "openai" uses MODEL_API_KEY.
+        "provider": "openai",
     }
     if not isinstance(s, dict) or set(s) - set(defaults):
         raise Blocked("settings_unknown_field")
@@ -67,6 +69,8 @@ def settings(env):
     for key in ('review_enabled',):
         if type(defaults[key]) is not bool:
             raise Blocked('settings_invalid')
+    if defaults['provider'] not in ('openai','workers_ai'):
+        raise Blocked('model_config_invalid')
     for key in ('model','review_model'):
         if not isinstance(defaults[key],str) or not 1<=len(defaults[key])<=100:
             raise Blocked('model_config_invalid')

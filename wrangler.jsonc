@@ -13,6 +13,7 @@
     "database_id": "1f599656-7852-47dc-b9ff-8b3fa4f9d976",
     "migrations_dir": "migrations"
   }],
+  "ai": {"binding": "AI"},
   "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"}],
   // SETTINGS_JSON is private: set it as a Secret, never here. keep_vars stops deploys from wiping dashboard values.
   "keep_vars": true

@@ -1,0 +1,8 @@
+{"provider":"workers_ai","provider_eligible":true,
+ "model":"@cf/meta/llama-3.3-70b-instruct-fp8-fast","input_usd_micro_per_million":300000,"output_usd_micro_per_million":2300000,
+ "review_model":"@cf/meta/llama-3.3-70b-instruct-fp8-fast","review_input_usd_micro_per_million":300000,"review_output_usd_micro_per_million":2300000,
+ "review_enabled":true,"monthly_ai_usd_micro":3000000,"ai_calls_per_day":20,
+ "lifetime_cost_usd_micro":500000000,"max_loss_usd_micro":500000000,"max_principal_usd_micro":500000000,
+ "monthly_fixed_usd_micro":0,"data_search_usd_micro_per_cycle":0,
+ "accounts":{"binance":true,"x":true,"discord":true,"telegram":true,"email":true},
+ "participant_region":"","speculative_task_max_minutes":15,"report_days":7}

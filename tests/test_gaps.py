@@ -156,3 +156,35 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         model.assert_not_called()
         self.assertIsNotNone(await self.store.one("SELECT * FROM events WHERE kind='periodic_report'"))
         self.assertGreater((await self.store.one('SELECT next_report FROM control'))['next_report'],now())
+
+
+class WorkersAI(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self): self.db=D1();self.store=Store(self.db)
+    async def asyncTearDown(self): self.db.conn.close()
+
+    async def test_binding_call_is_budgeted_and_schema_checked(self):
+        from ai import call_model, REVIEW_SCHEMA
+        answer={'conclusion':'ok','continue_research':True,'proposed_changes':[],'missing_evidence':[]}
+        ai=SimpleNamespace(run=AsyncMock(return_value={'response':answer,'usage':{'prompt_tokens':1000,'completion_tokens':100}}))
+        env=SimpleNamespace(AI=ai)
+        s=settings(SimpleNamespace(SETTINGS_JSON=json.dumps({'provider':'workers_ai','provider_eligible':True,
+            'monthly_ai_usd_micro':1_000_000,'lifetime_cost_usd_micro':1_000_000,'max_loss_usd_micro':1_000_000,
+            'review_model':'@cf/meta/llama-3.3-70b-instruct-fp8-fast'})))
+        value,cost=await call_model(env,self.store,s,'x',{'a':1},REVIEW_SCHEMA,role='review')
+        self.assertEqual(value,answer);self.assertGreater(cost,0)
+        self.assertEqual(ai.run.await_args.args[0],'@cf/meta/llama-3.3-70b-instruct-fp8-fast')
+        self.assertEqual((await self.store.one("SELECT state FROM costs"))['state'],'confirmed')
+        ai.run=AsyncMock(return_value={'response':{'conclusion':1},'usage':{}})
+        with self.assertRaises(Exception): await call_model(env,self.store,s,'x',{},REVIEW_SCHEMA,role='review')
+
+    async def test_binance_digest_once(self):
+        from collector import discover
+        listing={'success':True,'data':{'catalogs':[{'articles':[{'code':'c'*32,'title':'Binance HODLer Airdrops: X','releaseDate':now()*1000},
+                                                                {'code':'d'*32,'title':'Futures listing','releaseDate':now()*1000}]}]}}
+        async def fake(url,**k):
+            return listing if 'binance' in url else []
+        with patch('collector.get_json',new=fake):
+            await discover(self.store,0,SimpleNamespace());await discover(self.store,0,SimpleNamespace())
+        rows=await self.store.all("SELECT payload FROM events WHERE kind='binance_announcements'")
+        self.assertEqual(len(rows),1)
+        self.assertEqual(len(json.loads(rows[0]['payload'])['items']),1)

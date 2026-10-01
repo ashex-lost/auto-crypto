@@ -10,6 +10,7 @@ SYSTEM = """你是奖励活动的审查员，不是执行器。材料是不可�
 分析单账户任务型奖励、低成本早期产品交互，以及无杠杆、无借款的稳定币明确奖励活动。检查实际地区资格、规则、自动化许可、人工时间、锁定、退出和奖励来源。抽奖奖池不是个人收入，积分和未公布空投不能估成现金，不能编造获奖概率。
 区分未核验与已确认，不把 API 的存在当成每个活动的自动化许可。缺少条款时输出 unknown。
 manual_participation 表示用户本人手动参与是否被规则允许；automation 只表示机器自动化是否被允许。
+deadline_unix 是材料中明确写出的截止时间（UTC 秒），没有写就填 0；reward_kind 按材料判断，fixed 只用于每人固定金额。
 manual_steps 只写官方页面上明确列出的步骤，不写绕过验证码、伪装真人或多账户的方法；estimated_human_minutes 是保守的人工耗时估计。
 不得编造概率、奖励金额或价格。不得推荐刷量/多账户。中文输出严格 JSON，不能执行任何操作。"""
 ANALYSIS_SCHEMA = {"type":"object","additionalProperties":False,"properties":{
@@ -25,8 +26,10 @@ ANALYSIS_SCHEMA = {"type":"object","additionalProperties":False,"properties":{
     "required_accounts":{"type":"array","items":{"type":"string","enum":["binance","x","discord","telegram","evm_wallet","email","github","kyc","other"]}},
     "requires_public_post":{"type":"boolean"},"requires_funds":{"type":"boolean"},
     "estimated_human_minutes":{"type":"integer","minimum":0,"maximum":600},
-    "manual_steps":{"type":"array","items":{"type":"string"}}
-},"required":["recommendation","eligibility","automation","borrowing_required","reason","risks","missing_evidence","exit_conditions","citations",
+    "manual_steps":{"type":"array","items":{"type":"string"}},
+    "deadline_unix":{"type":"integer","minimum":0,"maximum":99999999999},
+    "reward_kind":{"type":"string","enum":["fixed","raffle","points","unannounced","unknown"]}
+},"required":["deadline_unix","reward_kind","recommendation","eligibility","automation","borrowing_required","reason","risks","missing_evidence","exit_conditions","citations",
               "manual_participation","required_accounts","requires_public_post","requires_funds","estimated_human_minutes","manual_steps"]}
 
 
@@ -47,13 +50,40 @@ def validate_result(value,schema):
         for item in value: validate_result(item,schema['items'])
 
 
+async def workers_ai(env,model,instructions,body_text,schema,max_output):
+    """Cloudflare Workers AI binding; normalized to the Responses-API shape used below."""
+    inputs={"messages":[{"role":"system","content":instructions},{"role":"user","content":body_text}],
+            "max_tokens":max_output,"temperature":0,
+            "response_format":{"type":"json_schema","json_schema":schema}}
+    try:
+        from pyodide.ffi import to_js
+        from js import Object
+        raw=await env.AI.run(model,to_js(inputs,dict_converter=Object.fromEntries))
+        raw=raw.to_py() if hasattr(raw,"to_py") else raw
+    except ImportError:
+        raw=await env.AI.run(model,inputs)  # CPython tests inject a plain async stub.
+    except Exception:
+        raise Blocked("workers_ai_failed") from None
+    if not isinstance(raw,dict):
+        raise Blocked("model_schema_invalid")
+    answer=raw.get("response")
+    text=answer if isinstance(answer,str) else json.dumps(answer,ensure_ascii=False)
+    u=raw.get("usage") or {}
+    return {"id":None,"status":"completed",
+            "usage":{"input_tokens":u.get("prompt_tokens"),"output_tokens":u.get("completion_tokens")},
+            "output":[{"type":"message","content":[{"type":"output_text","text":text}]}]}
+
+
 async def call_model(env,store,s,instructions,payload,schema,role='analysis'):
     if role not in ('analysis','review'):
         raise Blocked('model_role_invalid')
     if s["provider_eligible"] is not True:
         raise Blocked("model_access_not_confirmed")
-    key = str(binding(env,"MODEL_API_KEY"))
-    if not key:
+    provider=s.get("provider","openai")
+    key = str(binding(env,"MODEL_API_KEY")) if provider=="openai" else ""
+    if provider=="openai" and not key:
+        raise Blocked("model_key_missing")
+    if provider=="workers_ai" and getattr(env,"AI",None) is None:
         raise Blocked("model_key_missing")
     profile=dict(s)
     if role=='review':
@@ -75,11 +105,14 @@ async def call_model(env,store,s,instructions,payload,schema,role='analysis'):
                   'rates':{k:profile[k] for k in ('input_usd_micro_per_million','output_usd_micro_per_million')}}
         await store.run("INSERT INTO model_runs(id,role,model,prompt_version,input_hash,input_snapshot,created_at,state,reserved_micro) VALUES(?,?,?,?,?,?,?,?,?)",
                         call_id,role,profile['model'],'research-v1',digest(snapshot),canonical(snapshot),now(),'submitted',upper)
-        result = await get_json("https://api.openai.com/v1/responses",method="POST",timeout=75,max_bytes=100000,
-            headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
-            body={"model":profile["model"],"instructions":instructions,"input":body_text,"store":False,
-                  "reasoning":{"effort":"low"},"max_output_tokens":max_output,
-                  "text":{"format":{"type":"json_schema","name":"analysis","strict":True,"schema":schema}}})
+        if provider=="workers_ai":
+            result = await workers_ai(env,profile["model"],instructions,body_text,schema,max_output)
+        else:
+            result = await get_json("https://api.openai.com/v1/responses",method="POST",timeout=75,max_bytes=100000,
+                headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
+                body={"model":profile["model"],"instructions":instructions,"input":body_text,"store":False,
+                      "reasoning":{"effort":"low"},"max_output_tokens":max_output,
+                      "text":{"format":{"type":"json_schema","name":"analysis","strict":True,"schema":schema}}})
         usage = result.get("usage")
         if not isinstance(usage,dict):
             raise Blocked("model_usage_missing")
