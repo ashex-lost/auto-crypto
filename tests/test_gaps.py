@@ -188,3 +188,18 @@ class WorkersAI(unittest.IsolatedAsyncioTestCase):
         rows=await self.store.all("SELECT payload FROM events WHERE kind='binance_announcements'")
         self.assertEqual(len(rows),1)
         self.assertEqual(len(json.loads(rows[0]['payload'])['items']),1)
+
+
+class GptOssShape(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_completion_shape_and_fenced_json(self):
+        from ai import workers_ai
+        ai=SimpleNamespace(run=AsyncMock(return_value={'choices':[{'message':{'content':'```json\n{"a":1}\n```'}}],
+                                                       'usage':{'prompt_tokens':10,'completion_tokens':5}}))
+        out=await workers_ai(SimpleNamespace(AI=ai),'@cf/openai/gpt-oss-120b','sys','{}',{'type':'object'},100)
+        self.assertEqual(out['output'][0]['content'][0]['text'],'{"a":1}')
+        self.assertEqual(out['usage'],{'input_tokens':10,'output_tokens':5})
+        self.assertNotIn('response_format',ai.run.await_args.args[1])
+
+    def test_deadline_too_close(self):
+        r=assess_task(task(ends_at=now()+3600),s=settings(SimpleNamespace()))
+        self.assertIn('deadline_too_close',r['reasons'])

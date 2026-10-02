@@ -16,6 +16,7 @@ from readiness import check as readiness_check
 from task_handoff import evidence
 from galxe import capabilities, check_eligibility
 
+CRON_STEPS=12
 HEADERS={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"}
 
 
@@ -232,6 +233,12 @@ class Default(WorkerEntrypoint):
             return response({"error":"internal_error_check_database_and_configuration"},503)
 
     async def scheduled(self,controller,env=None,ctx=None):
-        result=await tick(self.env,Store(self.env.DB),cron=True)
+        # Infrequent wake-ups (every 8h): run several bounded steps so one wake-up discovers,
+        # screens and analyses instead of doing a single step and sleeping for 8 hours.
+        store=Store(self.env.DB);result={"state":"idle"}
+        for _ in range(CRON_STEPS):
+            result=await tick(self.env,store,cron=True)
+            if result["state"] in ("idle","paused","blocked","busy"):
+                break
         if result["state"]=="blocked":
             raise RuntimeError(result["reason"])
