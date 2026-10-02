@@ -1,0 +1,8 @@
+[project]
+name = "auto-crypto"
+version = "0.2.0"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["workers-py", "workers-runtime-sdk"]

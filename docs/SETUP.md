@@ -1,0 +1,79 @@
+# 接入清单：审阅通过后使用，现在不部署
+
+## 部署后第一步
+
+认证打开控制台后先查看 `GET /api/readiness`，或页面中的“部署验收”。它必须显示数据库已迁移、令牌有效、系统保持暂停；没有必要时不配置模型预算、钱包适配器或通知。`ready_for_research` 不等于可以花钱，`ready_for_financial_execution` 也不替代每个方案的批准。
+
+最终需要两个 Cloudflare Workers、D1 数据库和签名 Worker 的 Durable Object。不需要在线聊天室，部署之后不依赖个人电脑持续开机。
+
+## 主 Worker
+
+- ADMIN_TOKEN：控制台随机访问令牌，32–256 字符，存 Secret。
+- MODEL_API_KEY：合法可用的模型 API 密钥，存 Secret；订阅不是通用 API 账户。
+- EXECUTION_TOKEN：两个 Worker 相同的内部调用令牌，与批准令牌不同，存 Secrets。
+- SETTINGS_JSON：预算、地区资格、活动配置；以私有配置/Secret 保存，不提交公开仓库。
+- TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID：选择 Telegram 后再接入；否则可使用邮箱 Webhook 或仅控制台事件。
+- 邮箱推送二选一：`EMAIL_API_KEY` + `EMAIL_FROM` + `EMAIL_TO` 使用 Resend；或 `EMAIL_WEBHOOK_URL` + `EMAIL_WEBHOOK_TOKEN` + `EMAIL_TO` 使用你自己的邮件 Webhook。只发送事件类型和控制台事件编号，不发送私钥、签名原文或完整钱包余额。
+- RECEIVER_ADDRESS / RECEIVER_CHAIN_ID / RECEIVER_RPC_URL / RECEIVER_ASSETS_JSON：只读接收器。地址是独立实验钱包公开地址，RPC 密钥只存 Secret；接收器只读余额，不签名。
+- DB：现有 D1 binding；EXECUTOR：指向独立执行器的 Service Binding。
+
+SETTINGS_JSON 的完整字段以 src/config.py 为准：费用/本金上限默认 0，固定托管和搜索数据费用默认未知，provider_eligible=false，vaults=[]。这不是可以开始花钱的默认配置。
+
+每个 vaults 条目需要：id、opportunity_id、chain_id、vault、asset、asset_symbol、asset_decimals、principal_usd_micro、amount_raw、min_claim_raw、stop_loss_bps、eligibility_reviewed、automation_allowed、terms_evidence_url、costs_usd_micro。
+
+costs_usd_micro 明确填写 trading/slippage/bridge/exit，可附 ai/opportunity_cost。核查后确认没有某项操作才能填 0；未知不能填 0。资产单位与本金预算要匹配。登记条目只表示技术与条款已审查，不等于批准该轮投资。
+
+## 签名 Worker
+
+- OWNER_TOKEN：只在签名 Worker 的 Secret 中保存；用户批准时输入，主程序不持久保存。
+- WALLET_PRIVATE_KEY：仅存签名 Worker Secret。使用独立实验钱包，不使用主钱包助记词，不发送到对话。
+- RPC_URL：选定链的 HTTPS RPC，含密钥时同样存 Secret。
+- EXECUTOR_CONFIG_JSON：独立限额与已审查合约名单，私有保存。
+
+钱包准备分两步：先在 MetaMask、Rabby 或硬件钱包中创建独立实验钱包并只抄下公开地址；再把私钥直接作为签名 Worker 的 Secret 保存。私钥不要发到聊天、GitHub、主 Worker 或邮件。接收器使用同一个公开地址监控余额，领取交易仍须经过方案批准。
+
+EXECUTOR_CONFIG_JSON 必需字段：
+
+| 字段 | 含义 |
+|---|---|
+| chain_id | 当前支持 1 或 56 |
+| confirmations | 3–64，按链风险选；不能机械沿用测试最低值 |
+| gas_limit | 单笔 Gas 上限 |
+| max_gas_price_wei | 最高 Gas 单价，十进制字符串 |
+| lifetime_fee_cap_wei | 累计 Gas 上限，十进制字符串 |
+| max_gas_usd_micro | 7 笔交易的保守 Gas 美元预算 |
+| gas_usd_quote_expires_at | 报价有效期，UTC Unix 秒 |
+| vaults | 经过审查的适配条目数组 |
+
+执行器每个适配条目包含 id/reviewed/opportunity_id/asset/vault/distributor/asset_decimals/max_amount_raw，以及 asset_code_hash/vault_code_hash/distributor_code_hash。地址和代码 hash 从正确链核验，不能把 AI 随意生成的字符串填进白名单。
+
+## 之后的部署顺序
+
+仅在用户检查通过后：部署签名 Worker（无公网入口）、数据库迁移、主 Worker、Service Binding，配置 Secrets 和受保护的控制台入口。先不启用 Cron。
+
+验证读取、模拟、通知和批准阻断，再批准最小金额真实方案。完整核对后才开启定时运行。初始可考虑 5 分钟唤醒，来源默认每小时刷新；这是轮询，不承诺秒级抢名额，频率根据实际费用和时效调整。
+
+地区与账户资格由实际服务条款决定，不能通过更换服务器地区或借他人密钥自动解决。
+# 研究版本新增配置
+
+`migrations/0004_research.sql` 增加筛选结果和模型调用记录。已有数据库须按顺序迁移；回滚代码不会自动回滚数据库。
+
+- `model` 及 `input_usd_micro_per_million`、`output_usd_micro_per_million`：普通分析的模型和价格。
+- `review_model` 及同名 `review_` 价格字段：复盘模型和价格。
+- `analysis_max_call_usd_micro`、`review_max_call_usd_micro`：单次费用上限，默认 $0.05 和 $0.20；仍须满足总预算。
+- `review_enabled`：默认 false，启用后才安排每周 AI 复盘。
+- `research_principal_usd_micro`：默认参考 $100，只用于比较，不是用户本金、余额或投资授权。
+
+1 美元 = 1,000,000 微美元。默认普通分析 gpt-6-luna，复盘 gpt-6-sol，仅为配置起点，未验证谁最赚钱。使用标准非缓存 token 价格保守估算，最终以账单为准。参考 [Luna 官方页面](https://developers.openai.com/api/docs/models/gpt-6-luna) 和 [Sol 官方页面](https://developers.openai.com/api/docs/models/gpt-6-sol)。更换模型须同步核对价格和接口支持。模型资格、密钥、预算未配置时不发起付费请求。
+
+## Galxe 任务活动（只读适配器）
+
+Galxe 的官方 Integration API 可以列出活动并查询某个公开地址的资格，但它是项目方 API，不是个人任务提交接口。程序只接入读取和资格快照；不会把访问令牌当成登录会话，也不会自动发帖、完成社交任务、解验证码或领取奖励。
+
+需要的私有配置：
+
+- `GALXE_ACCESS_TOKEN`：从 Galxe dashboard 的 Server API 生成，直接存主 Worker Secret；不要发到聊天或 GitHub。
+- `GALXE_SPACE_IDS_JSON`：要监控的官方 Space ID JSON 数组，例如 `["40"]`，作为私有变量保存。
+- `RECEIVER_ADDRESS`：独立实验钱包公开地址，用于资格查询；不要放私钥。
+
+程序会自动读取活动、检查状态/截止时间/人数上限，再按固定规则筛选；需要更深入资格查询时，控制台会出现“自动查询我的资格（不参与、不签名）”。这一步只保存资格快照，仍不会生成收益或执行方案。

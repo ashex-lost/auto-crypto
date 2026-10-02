@@ -1,45 +1,88 @@
-# auto-crypto
+# Auto Crypto：先批准，再参与
 
-空投自动参与实验：先验证云端调度、数据库和模拟预算，随后研究具体活动。
+目标：搜索适合的空投/明确奖励活动 → AI 审查 → 核算全部成本 → 用户批准 → 自动参与和退出/领取 → 对账复盘。
 
-## 当前状态
-这是**模拟执行基础版本**，不是已上线的赚钱机器人。Cloudflare Worker 每 5 分钟运行一次，将心跳写入 D1 数据库；`/status` 显示最近心跳、任务数和模拟费用。没有活动发现、模型调用、钱包签名、链上交易或收益。
+**研究与审批框架已部署，但尚未接入真实模型账户、钱包或获批准的活动。** 接入具体活动和最小金额验收仍是上线条件。没有合格机会时不交易。
 
-## 云端部署
+## 2026-09-30 缺漏补全
 
-- Cloudflare Workers Free；D1 数据库 `auto-crypto-sim`。
-- GitHub 连接后，仓库根目录的 `wrangler.jsonc` 用于部署。
-- Worker 名称必须是 `auto-crypto-simulation`；构建命令可留空，部署命令为 `npx wrangler deploy`。
-- `GET /status` 是公开的只读状态页，无写入接口。首次访问或定时运行会建表。
-- Cron 变更可能需要几分钟生效。数据库中 `state.heartbeat` 是实际运行证据。
+对照 10 条目标检查后补全了：免费批量筛选（没有模型也不卡住）、Binance 公告 JSON 来源、账户与人工时间成本、风险收益比、真正可生成的人工交接单和带官方链接/步骤的邮件、资金方案授权清单、到账与费用登记、人工介入计数、确定性定期复盘、亏损上限自动暂停。详见 [缺漏检查](docs/GAP_REVIEW_2026-09-30.md)；新配置见 [CONFIG_TEMPLATE.md](docs/CONFIG_TEMPLATE.md)，新接口见 [API.md](docs/API.md)。部署时需执行迁移 `0008_realized_ledger.sql`。
 
-Cloudflare Dashboard 中可以在 D1 数据库的 Console 手动插入一个**模拟任务**：
+## 当前策略调整
 
-```sql
-INSERT INTO jobs (id, cost_cents) VALUES ('demo-1', 5);
-```
+任务型奖励和低成本早期交互成为研究主线。现有金库执行器保留，但不能执行任务型活动。新增 `src/tasks.py` 负责区分固定奖励、抽奖、积分和未公布空投，检查许可与费用；目前未接通任务发现接口或任务执行器。任务研究与实际参与不能混为一谈。见 [当前候选与缺口](docs/TASK_REVIEW_2026-09-28.md)。
 
-下一次定时运行会将它标为 `simulated` 或 `rejected_budget`。重复 ID 不会被重复插入或扣算。任务金额只用于验证限制，不代表真实 U、手续费、空投资格或收益。
+## 实际支持范围
 
-暂停：在 D1 Console 执行 `INSERT INTO state (key, value) VALUES ('paused', '1') ON CONFLICT(key) DO UPDATE SET value='1';`。恢复：把值改为 `0`。状态可在 `/status` 查看。
+| 环节 | 已实现 | 当前边界 |
+|---|---|---|
+| 信息收集 | Merkl 官方活动 API 分页采集；Binance 公告链接解析；记录规则版本和故障 | Merkl 已在真实本地 Worker 中抓到活动；Binance 页面本次无法直接读取，明确报错 |
+| AI 审查 | 固定规则先筛选，再用 Responses API 分析；按用途配置模型、缓存、预留费用和逐次审计 | 没有真实模型密钥，未付费调用；缺少条款标未知 |
+| 算账 | 本金与支出分开，Gas、交易、滑点、跨链、退出、AI、搜索/数据、托管分列；三种奖励情景 | 费用未知时不生成值得参与的结论；APR 和 25% 压力情景不是收益保证 |
+| 批准 | 页面展示具体金额、合约、期限、费用和退出条件；摘要绑定方案版本 | 每个资金方案须批准；任务型交接也须批准，AI 无法自行批准 |
+| 执行 | 精确授权 → ERC4626 mint → 撤销余下授权 → 持有/赎回 → Merkl 领取 | 首版只支持核查过的 Ethereum/BNB Chain 金库、本金与奖励同币；无借款、跨链或任意兑换 |
+| 恢复 | 签名前模拟、广播前持久化签名交易、超时查询相同 hash、确认回执后推进 | 失败交易记账并停止，不盲目重发 |
+| 对账复盘 | 实际数量、费用、市场估值、AI 复盘建议 | 市场估算不等于卖出所得；最终美元账单待核对，复盘不能改权限 |
+| 通知 | 控制台事件箱、可选 Telegram/邮箱 Webhook、重试退避 | 未配置通知渠道时只有控制台，没有实际推送 |
+| 接收器 | 只读监控独立钱包的原生币和登记代币余额 | 不生成、保存或传输私钥；RPC 和地址配置后才会有余额快照 |
+| 任务交接 | 为允许的任务活动生成官方链接、步骤和完成证据入口 | 不自动登录、发帖、解 CAPTCHA 或伪装人工 |
+
+**Binance 稳定币 Launchpool 降为次要研究类别，自动申购接口尚未核实。** 链上活动也必须单独核查条款和合约；Merkl 收录不是安全背书或投资推荐。当前活动适配名单为空。
+
+## 文件分工：14 个 Python 文件
+
+整体分成入口、调度、业务、基础服务和独立钱包执行器。财务三个文件已合并，AI 分析与复盘也已合并；数据库格式和批准规则不变。
+
+| 文件 | 小白版作用 |
+|---|---|
+| `src/worker.py` | 门口：接收你点的批准/暂停，以及定时唤醒。 |
+| `src/dashboard.py` | 操作页面：显示活动、费用、账目，让你批准或拒绝。 |
+| `src/engine.py` | 总调度：安排本轮搜索、分析、执行、记账或复盘。 |
+| `src/collector.py` | 找活动：收集官方信息，检查规则有没有变化。 |
+| `src/ai.py` | AI 顾问：参与前分析风险，参与后复盘；记录模型调用费用，没有钱包操作权。 |
+| `src/finance.py` | 财务：参与前算是否划算，参与后记真实收支，再按市场价估值。 |
+| `src/policy.py` | 规则检查：检查资格、预算和范围，生成需要你批准的具体方案。 |
+| `src/execution.py` | 执行联络：把获批方案交给独立钱包执行器，并查询结果。 |
+| `src/notifier.py` | 通知：保存待办消息，配置渠道后推送。 |
+| `src/storage.py` | 记忆：保存进度、预算、批准和事件，避免重启后重复做。 |
+| `src/config.py` | 设置：读取预算、地区资格和已核查活动名单。 |
+| `src/network.py` | 网络连接：访问外部接口，限制等待时间和返回大小。 |
+| `src/common.py` | 公共检查：检查金额、地址和方案是否被改动。 |
+
+独立的 `executor/` 使用 JavaScript，是钱包执行部分：
+
+| 文件 | 小白版作用 |
+|---|---|
+| `worker.js` | 验证身份，区分你的批准与程序的普通调用。 |
+| `policy.js` | 独立复核金额、合约、次数和有效期。 |
+| `engine.js` | 按已批准方案参与、撤销授权、退出和领取，核对交易结果。 |
+
+`wrangler.jsonc` 是 Cloudflare 的运行配置；`migrations/` 是账本表结构；`tests/` 是自动检查；其余依赖及锁定文件确保安装相同版本的工具。完整流程与模块关系见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+最终接入时按 [CONFIG_TEMPLATE.md](docs/CONFIG_TEMPLATE.md) 区分公开地址、私有变量和只进 Secret 的密钥。
+
+## 你现在先检查什么
+
+先看 [审阅说明](docs/REVIEW.md) 和 [架构边界](docs/ARCHITECTURE.md)。检查通过后，再确定当期活动、配置模型账户/独立钱包/通知和预算，进行最小金额验收。现在不需要往钱包转钱。
+
+配置关闭定时、关闭公网路由、默认暂停、费用预算为零。部署后先查看控制台“部署验收”或 `/api/readiness`，通过研究验收后才考虑开启扫描；没有自动部署流水线。上传代码不代表批准上线或花钱。
+
+本轮变化及真实资料核查见 [研究记录](docs/ACTIVITY_REVIEW_2026-09-27.md)。固定规则先筛掉明显不合适的活动，不消耗模型费用。参考本金测算缺少完整费用时，净收益保持未知。普通分析和复盘可以使用不同模型，费用仍共享总上限；AI 复盘默认关闭。调用记录为以后比较模型提供依据，目前没有开启付费双跑或自动换模型。
 
 ## 本地验证
 
-需要 Node.js 18+，无运行时依赖：`node --test`。仓库保留了原 Python SQLite 模拟原型，可用下面的命令验证；Cloudflare 不运行 Python 文件。
+需要 Node.js 22+、Python 3.13+、uv 和 pnpm。版本由锁定文件固定。
+
 ```sh
-python3 -m unittest discover -s tests -v
-python3 worker.py enqueue --id demo-1 --cost-cents 5
-python3 worker.py once
-python3 worker.py status
+uv sync --locked
+pnpm install --frozen-lockfile
+uv run python -m unittest discover -s tests -v
+node --test tests/executor.test.js
+pnpm check:executor
+node tests/executor_runtime.mjs
+pnpm db:local
+uv run pywrangler dev --local --test-scheduled --port 8789 -c wrangler.jsonc -c executor/wrangler.jsonc
 ```
-金额单位为模拟美元分，仅用于验证预算机制，不是链上代币单位。
-任务在本机创建时默认写入 data/state.db；不要提交数据库。
 
-## 实盘前必须完成
+`tests/runtime_smoke.py` 只用于无模型密钥、无资金方案的本地测试；需要文件内注明的测试令牌。它短暂恢复本地研究、读取公开活动，然后恢复暂停，不能对线上服务使用。
 
-1. 确认用户所在地区、交易所、活动及 API 服务的实际资格；部署地点不改变资格。
-2. 找到允许自动化参与的具体活动并核对官方条款、真实投入、费用和退出路径。
-3. 增加数据来源、失败告警、独立小额钱包及隔离签名；模型不能直接持有密钥。
-4. 逐一验证权限、幂等和实际资金上限，再启用任何真实交易。
-
-目前不得把 `/status` 中的模拟金额当作盈利或真实花费。
+`pnpm check:bundle` 和 `pnpm check:executor` 都只做 dry-run 打包，不部署。接入清单见 [SETUP.md](docs/SETUP.md)，接口见 [API.md](docs/API.md)。

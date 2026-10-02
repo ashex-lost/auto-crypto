@@ -1,12 +1,23 @@
 {
-  "name": "auto-crypto-simulation",
+  "name": "auto-crypto",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.19.0",
   "scripts": {
-    "test": "node --test",
-    "deploy": "wrangler deploy"
+    "test": "node --test tests/*.test.js",
+    "dev": "uv run pywrangler dev --local --test-scheduled",
+    "db:local": "wrangler d1 migrations apply auto-crypto-sim --local",
+    "check:bundle": "uv run pywrangler deploy --dry-run --outdir dist",
+    "check:executor": "wrangler deploy --config executor/wrangler.jsonc --dry-run --outdir dist-executor"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "miniflare": "5.20260921.0-alpha",
+    "wrangler": "4.136.3"
+  },
+  "dependencies": {
+    "ethers": "6.17.0"
   }
 }

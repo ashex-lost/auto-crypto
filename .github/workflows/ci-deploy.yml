@@ -1,0 +1,62 @@
+# Tests on every push/PR. Deploys only from main (merging the PR is your code approval).
+# Deploy never sets secrets, never enables funding, and never approves a proposal.
+name: ci-deploy
+on:
+  push:
+    branches: [main, "review/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: uv sync --locked
+      - run: pnpm install --frozen-lockfile
+      - run: uv run python -m unittest discover -s tests -v
+      - run: node --test tests/executor.test.js
+      - run: pnpm check:executor
+      - run: node tests/executor_runtime.mjs
+      - run: pnpm check:bundle
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: uv sync --locked
+      - run: pnpm install --frozen-lockfile
+      # Schema first (additive migrations), then the signer, then the main Worker.
+      - run: pnpm exec wrangler d1 migrations apply auto-crypto-sim --remote
+      - run: pnpm exec wrangler deploy --config executor/wrangler.jsonc
+      - run: uv run pywrangler deploy
+      # Private runtime config lives in GitHub Actions secrets and is copied to Worker secrets; never in the repo.
+      - name: Push runtime secrets
+        env:
+          SETTINGS_JSON: ${{ secrets.SETTINGS_JSON }}
+          EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+        run: |
+          umask 077
+          python3 -c "import json,os;print(json.dumps({k:os.environ[k] for k in ('SETTINGS_JSON','EMAIL_API_KEY','EMAIL_FROM','EMAIL_TO','DASHBOARD_URL') if os.environ.get(k)}))" > "$RUNNER_TEMP/s.json"
+          if [ "$(cat "$RUNNER_TEMP/s.json")" != "{}" ]; then pnpm exec wrangler secret bulk "$RUNNER_TEMP/s.json" --name auto-crypto-simulation; fi
+          rm -f "$RUNNER_TEMP/s.json"

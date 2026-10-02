@@ -1,0 +1,446 @@
+{
+  "basis": "Public API data normalized by collector during local Worker run; not raw API response or recommendation",
+  "observed_at": 1790491809,
+  "candidates": [
+    {
+      "id": "merkl:13939549333890573837",
+      "title": "Supply to Bitwise Premium RWA AUSD V2 vault on Morpho on Ethereum",
+      "url": "https://api.merkl.xyz/v4/opportunities/13939549333890573837",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "LEND",
+        "apr": 3.2416712295595573,
+        "chainId": 1,
+        "depositUrl": "https://app.morpho.org/ethereum/vault/0xB344e331A3cDa61D329fb3Cca2Be5942da87c418",
+        "description": "Earn rewards by supplying to the Bitwise Premium RWA AUSD V2 vault on Morpho on Ethereum",
+        "earliestCampaignEnd": "1793628000",
+        "earliestCampaignStart": "1788354000",
+        "explorerAddress": "0xB344e331A3cDa61D329fb3Cca2Be5942da87c418",
+        "howToSteps": [
+          "Go to Morpho and supply PAPY.",
+          "Keep the deposit active. Withdrawals reduce your accrual in real time.",
+          "Check each campaign's rules for minimum supply amounts or address restrictions."
+        ],
+        "id": "13939549333890573837",
+        "liveCampaigns": 1,
+        "name": "Supply to Bitwise Premium RWA AUSD V2 vault on Morpho on Ethereum",
+        "protocol": "morpho",
+        "rewards": [
+          {
+            "address": "0x11c66F62aEDCBCec6B6d709969871a568944A889",
+            "campaign_id": "6699256721905016472",
+            "symbol": "AUSD"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xB344e331A3cDa61D329fb3Cca2Be5942da87c418",
+            "decimals": 18,
+            "symbol": "PAPY"
+          },
+          {
+            "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+            "decimals": 6,
+            "symbol": "AUSD"
+          }
+        ],
+        "type": "ERC20LOGPROCESSOR"
+      }
+    },
+    {
+      "id": "merkl:17006444626997054711",
+      "title": "Coinbase tokenized stocks on Aerodrome, via Revert",
+      "url": "https://api.merkl.xyz/v4/opportunities/17006444626997054711",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "POOL",
+        "apr": 29.764561,
+        "chainId": 8453,
+        "depositUrl": "https://revert.finance/#/discover",
+        "description": "LP on Aerodrome via Revert Finance to earn rewards",
+        "earliestCampaignEnd": "1791216000",
+        "earliestCampaignStart": "1790089200",
+        "explorerAddress": null,
+        "howToSteps": [
+          "Connect your wallet on Merkl to check if you qualify.",
+          "If eligible, claim your rewards directly from this page."
+        ],
+        "id": "17006444626997054711",
+        "liveCampaigns": 1,
+        "name": "Coinbase tokenized stocks on Aerodrome, via Revert",
+        "protocol": "aerodrome",
+        "rewards": [
+          {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "campaign_id": "6835026597793459450",
+            "symbol": "USDC"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          }
+        ],
+        "type": "ENCOMPASSING"
+      }
+    },
+    {
+      "id": "merkl:13065663488063861405",
+      "title": "Provide liquidity to ProjectX WHYPE-USDC 0.05%",
+      "url": "https://api.merkl.xyz/v4/opportunities/13065663488063861405",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "POOL",
+        "apr": 5.507975233210478,
+        "chainId": 999,
+        "depositUrl": "https://www.prjx.com/deposit?tokenA=0x5555555555555555555555555555555555555555&tokenB=0xb88339CB7199b77E23DB6E890353E22632Ba630f&fee=500",
+        "description": "Earn rewards by providing liquidity to the ProjectX WHYPE-USDC pool on HyperEVM",
+        "earliestCampaignEnd": "1792206000",
+        "earliestCampaignStart": "1789614000",
+        "explorerAddress": "0x6c9A33E3b592C0d65B3Ba59355d5Be0d38259285",
+        "howToSteps": [
+          "Provide liquidity on projectx.",
+          "Earn rewards based on your liquidity position."
+        ],
+        "id": "13065663488063861405",
+        "liveCampaigns": 1,
+        "name": "Provide liquidity to ProjectX WHYPE-USDC 0.05%",
+        "protocol": "projectx",
+        "rewards": [
+          {
+            "address": "0xfD739d4e423301CE9385c1fb8850539D657C296D",
+            "campaign_id": "13168702950276194350",
+            "symbol": "kHYPE"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          {
+            "address": "0x5555555555555555555555555555555555555555",
+            "decimals": 18,
+            "symbol": "WHYPE"
+          }
+        ],
+        "type": "PROJECT_X"
+      }
+    },
+    {
+      "id": "merkl:1664939316231972230",
+      "title": "Provide liquidity to ETH & LST markets on 1inch Aqua - Season 1 (USDC rewards)",
+      "url": "https://api.merkl.xyz/v4/opportunities/1664939316231972230",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "DROP",
+        "apr": 1722.69,
+        "chainId": 1,
+        "depositUrl": "https://1inch.com/aqua/incentives/campaigns",
+        "description": "Earn rewards by providing liquidity to ETH and liquid staking token markets paired with 1INCH on 1inch Aqua on Ethereum. Rewards are distributed weekly based on the swap volume your liquidity handles. Part of Aqua Season 1. Learn more about the program [here](https://1inch.com/blog/post/1inch-incentive-program-for-aqua).",
+        "earliestCampaignEnd": "1793185200",
+        "earliestCampaignStart": "1785225600",
+        "explorerAddress": null,
+        "howToSteps": [
+          "Provide liquidity on one of this campaign's markets at 1inch.com/aqua with 1INCH or any of: WETH, stETH, wstETH, weETH, osETH, rETH, cbETH, ETHx, ezETH, rsETH or tETH. One token is enough - one-sided positions are supported. Aave aToken versions of these assets qualify too.",
+          "Rewards accrue weekly based on the swap volume your liquidity handles.",
+          "Claim your rewards on this page (claims are on Ethereum)."
+        ],
+        "id": "1664939316231972230",
+        "liveCampaigns": 1,
+        "name": "Provide liquidity to ETH & LST markets on 1inch Aqua - Season 1 (USDC rewards)",
+        "protocol": "1inch",
+        "rewards": [
+          {
+            "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "campaign_id": "16204265945589512459",
+            "symbol": "USDC"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "decimals": 6,
+            "symbol": "USDC"
+          }
+        ],
+        "type": "ENCOMPASSING"
+      }
+    },
+    {
+      "id": "merkl:8688416782939362395",
+      "title": "Supply to Steakhouse Prime ETH V2 vault on Morpho on Monad",
+      "url": "https://api.merkl.xyz/v4/opportunities/8688416782939362395",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "LEND",
+        "apr": 1.4945614016759985,
+        "chainId": 143,
+        "depositUrl": "https://app.morpho.org/monad/vault/0xbeef04b01e0275D4ac2e2986256BB14E3Ff6ef42",
+        "description": "Earn rewards by supplying to the Steakhouse Prime ETH V2 vault on Morpho on Monad",
+        "earliestCampaignEnd": "1791554400",
+        "earliestCampaignStart": "1788962400",
+        "explorerAddress": "0xbeef04b01e0275D4ac2e2986256BB14E3Ff6ef42",
+        "howToSteps": [
+          "Lend assets on Morpho.",
+          "Rewards accumulate automatically."
+        ],
+        "id": "8688416782939362395",
+        "liveCampaigns": 1,
+        "name": "Supply to Steakhouse Prime ETH V2 vault on Morpho on Monad",
+        "protocol": "morpho",
+        "rewards": [
+          {
+            "address": "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
+            "campaign_id": "5057606933310155314",
+            "symbol": "WMON"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xEE8c0E9f1BFFb4Eb878d8f15f368A02a35481242",
+            "decimals": 18,
+            "symbol": "WETH"
+          },
+          {
+            "address": "0xbeef04b01e0275D4ac2e2986256BB14E3Ff6ef42",
+            "decimals": 18,
+            "symbol": "steakETH"
+          }
+        ],
+        "type": "ERC20LOGPROCESSOR"
+      }
+    },
+    {
+      "id": "merkl:8341880903517882363",
+      "title": "Borrow wETH from the Aave V4 Etherfi Spoke",
+      "url": "https://api.merkl.xyz/v4/opportunities/8341880903517882363",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "BORROW",
+        "apr": 0.75,
+        "chainId": 1,
+        "depositUrl": "https://pro.aave.com/explore/asset/1/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "description": "Earn rewards by borrowing Wrapped Ether from the Aave V4 Etherfi Spoke using weETH as collateral on Ethereum",
+        "earliestCampaignEnd": "1790859600",
+        "earliestCampaignStart": "1790254800",
+        "explorerAddress": "0xbF10BDfE177dE0336aFD7fcCF80A904E15386219",
+        "howToSteps": [
+          "Go to Aave and borrow wETH.",
+          "Keep your borrow position active for the duration of the campaign.",
+          "Check each campaign's rules for minimum borrow amounts or eligible collateral types."
+        ],
+        "id": "8341880903517882363",
+        "liveCampaigns": 1,
+        "name": "Borrow wETH from the Aave V4 Etherfi Spoke",
+        "protocol": "aave",
+        "rewards": [
+          {
+            "address": "0xe02ED8dB1eBf93AA7588bAa108B545AB853c1Ceb",
+            "campaign_id": "7086178149340154126",
+            "symbol": "WETH"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "decimals": 18,
+            "symbol": "wETH"
+          }
+        ],
+        "type": "AAVE_V4_SPOKE_BORROW"
+      }
+    },
+    {
+      "id": "merkl:11217817339280669184",
+      "title": "Supply to the Re7 USDC vault on Morpho on World Chain",
+      "url": "https://api.merkl.xyz/v4/opportunities/11217817339280669184",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "LEND",
+        "apr": 6.15868311216845,
+        "chainId": 480,
+        "depositUrl": "https://lite.morpho.org/world chain/earn",
+        "description": "Earn rewards by supplying to the Re7 USDC vault on Morpho on World Chain",
+        "earliestCampaignEnd": "1790830740",
+        "earliestCampaignStart": "1788238800",
+        "explorerAddress": "0xb1E80387EbE53Ff75a89736097D34dC8D9E9045B",
+        "howToSteps": [
+          "Lend assets on Morpho.",
+          "Rewards accumulate automatically."
+        ],
+        "id": "11217817339280669184",
+        "liveCampaigns": 1,
+        "name": "Supply to the Re7 USDC vault on Morpho on World Chain",
+        "protocol": "morpho",
+        "rewards": [
+          {
+            "address": "0x2cFc85d8E48F8EAB294be644d9E25C3030863003",
+            "campaign_id": "9745708427751352767",
+            "symbol": "WLD"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          {
+            "address": "0xb1E80387EbE53Ff75a89736097D34dC8D9E9045B",
+            "decimals": 18,
+            "symbol": "Re7USDC"
+          }
+        ],
+        "type": "MORPHOVAULT"
+      }
+    },
+    {
+      "id": "merkl:11005622500714298097",
+      "title": "Lend frxUSD on Aave V4",
+      "url": "https://api.merkl.xyz/v4/opportunities/11005622500714298097",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "LEND",
+        "apr": 5.36,
+        "chainId": 1,
+        "depositUrl": "https://pro.aave.com/explore/asset/1/0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
+        "description": "Earn rewards for net lending frxUSD on Aave V4 on Ethereum",
+        "earliestCampaignEnd": "1790859600",
+        "earliestCampaignStart": "1790254800",
+        "explorerAddress": null,
+        "howToSteps": [
+          "Go to Aave V4 and supply frxUSD.",
+          "Your accrual is based on your net position: supply minus same-token borrows. Borrowing the same token reduces your rewards.",
+          "Check each campaign's rules for minimum supply amounts or address restrictions."
+        ],
+        "id": "11005622500714298097",
+        "liveCampaigns": 1,
+        "name": "Lend frxUSD on Aave V4",
+        "protocol": "aave",
+        "rewards": [
+          {
+            "address": "0xaCbF5BB973186F23BFd8d52d6D9BE2123CeF3bDc",
+            "campaign_id": "16706444518291565320",
+            "symbol": "frxUSD"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
+            "decimals": 18,
+            "symbol": "frxUSD"
+          }
+        ],
+        "type": "AAVE_V4_HUB_NET_LENDING"
+      }
+    },
+    {
+      "id": "merkl:6060587376943257287",
+      "title": "Supply to Clearstar cbAssets V2 vault on Morpho on Base",
+      "url": "https://api.merkl.xyz/v4/opportunities/6060587376943257287",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "LEND",
+        "apr": 1.7039706273848418,
+        "chainId": 8453,
+        "depositUrl": "https://app.morpho.org/base/vault/0x91C056B6d4311a743614FBc03ac32d4E6A2d3a3c",
+        "description": "Earn rewards by supplying to the Clearstar cbAssets V2 vault on Morpho on Base",
+        "earliestCampaignEnd": "1790978400",
+        "earliestCampaignStart": "1788559200",
+        "explorerAddress": "0x91C056B6d4311a743614FBc03ac32d4E6A2d3a3c",
+        "howToSteps": [
+          "Go to Morpho and supply CSHYUSDC.",
+          "Keep the deposit active. Withdrawals reduce your accrual in real time.",
+          "Check each campaign's rules for minimum supply amounts or address restrictions."
+        ],
+        "id": "6060587376943257287",
+        "liveCampaigns": 1,
+        "name": "Supply to Clearstar cbAssets V2 vault on Morpho on Base",
+        "protocol": "morpho",
+        "rewards": [
+          {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "campaign_id": "2486168783479812573",
+            "symbol": "USDC"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0x91C056B6d4311a743614FBc03ac32d4E6A2d3a3c",
+            "decimals": 18,
+            "symbol": "CSHYUSDC"
+          },
+          {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          }
+        ],
+        "type": "ERC20LOGPROCESSOR"
+      }
+    },
+    {
+      "id": "merkl:13910696446007033969",
+      "title": "Borrow USDC on OETH/USDC 86%",
+      "url": "https://api.merkl.xyz/v4/opportunities/13910696446007033969",
+      "observed_at": 1790491809,
+      "source": "merkl",
+      "data": {
+        "action": "BORROW",
+        "apr": 6.572516463739182,
+        "chainId": 1,
+        "depositUrl": "https://app.morpho.org/ethereum/market/0xb8fef900b383db2dbbf4458c7f46acf5b140f26d603a6d1829963f241b82510e",
+        "description": "Earn rewards by borrowing USDC using OETH on Morpho on Ethereum",
+        "earliestCampaignEnd": "1790812800",
+        "earliestCampaignStart": "1790208000",
+        "explorerAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "howToSteps": [
+          "Borrow assets on Morpho.",
+          "Rewards accumulate automatically."
+        ],
+        "id": "13910696446007033969",
+        "liveCampaigns": 1,
+        "name": "Borrow USDC on OETH/USDC 86%",
+        "protocol": "morpho",
+        "rewards": [
+          {
+            "address": "0x856c4Efb76C1D1AE02e20CEB03A2A6a08b0b8dC3",
+            "campaign_id": "7309036885334996700",
+            "symbol": "OETH"
+          }
+        ],
+        "status": "LIVE",
+        "tokens": [
+          {
+            "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "decimals": 6,
+            "symbol": "USDC"
+          }
+        ],
+        "type": "MORPHOBORROW"
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "label": "Historical official OPN Launchpool announcement; not a live opportunity",
+    "source": "binance",
+    "url": "https://www.binance.com/en/support/announcement/detail/d5810276f8c44fa7ade2b93746cd6a0a",
+    "observed_at": 1790467200,
+    "data": {
+      "title": "Opinion OPN Launchpool",
+      "earliestCampaignEnd": 1772668740,
+      "article_text": "Official facts: USDC pool; farming March 3–4, 2026; OPN reward."
+    },
+    "expected_reason": "campaign_not_live"
+  },
+  {
+    "label": "Official Merkl page: borrowing, no active campaign; manually normalized facts, not API response",
+    "source": "merkl",
+    "url": "https://app.merkl.xyz/opportunities/17413814142719581538",
+    "observed_at": 1790467200,
+    "data": {
+      "name": "Borrow USDC on USP/USDC 86%",
+      "chainId": 1,
+      "action": "borrow",
+      "status": "ENDED",
+      "tokens": [
+        {
+          "symbol": "USDC"
+        }
+      ],
+      "rewards": [
+        {
+          "symbol": "PIKU"
+        }
+      ]
+    },
+    "expected_reason": "borrowing_or_leverage"
+  }
+]
