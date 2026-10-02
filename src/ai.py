@@ -50,11 +50,41 @@ def validate_result(value,schema):
         for item in value: validate_result(item,schema['items'])
 
 
+# Models with Workers AI JSON mode; others get the schema in the prompt and are validated afterwards.
+JSON_MODE_MODELS=("@cf/meta/llama-3.3-70b-instruct-fp8-fast","@cf/meta/llama-3.1-8b-instruct")
+
+
+def extract_text(raw):
+    """Accept the Workers AI shapes: {response}, chat {choices}, or Responses {output}."""
+    if isinstance(raw.get("response"),(dict,list)):
+        return json.dumps(raw["response"],ensure_ascii=False)
+    if isinstance(raw.get("response"),str):
+        return raw["response"]
+    choices=raw.get("choices")
+    if isinstance(choices,list) and choices:
+        return str(((choices[0] or {}).get("message") or {}).get("content") or "")
+    if isinstance(raw.get("output_text"),str):
+        return raw["output_text"]
+    return "".join(c.get("text","") for item in raw.get("output") or [] if isinstance(item,dict) and item.get("type")=="message"
+                   for c in item.get("content") or [] if isinstance(c,dict) and c.get("type")=="output_text")
+
+
+def json_part(text):
+    """Strip code fences or prose around a single JSON object."""
+    a,b=text.find("{"),text.rfind("}")
+    return text[a:b+1] if 0<=a<b else text
+
+
 async def workers_ai(env,model,instructions,body_text,schema,max_output):
     """Cloudflare Workers AI binding; normalized to the Responses-API shape used below."""
-    inputs={"messages":[{"role":"system","content":instructions},{"role":"user","content":body_text}],
-            "max_tokens":max_output,"temperature":0,
-            "response_format":{"type":"json_schema","json_schema":schema}}
+    system=instructions
+    inputs={"max_tokens":max_output,"temperature":0}
+    if model in JSON_MODE_MODELS:
+        inputs["response_format"]={"type":"json_schema","json_schema":schema}
+    else:
+        system+="\n只输出一个 JSON 对象，不要输出其他文字。必须严格符合这个 JSON Schema："+json.dumps(schema,ensure_ascii=False)
+        inputs["reasoning_effort"]="low"
+    inputs["messages"]=[{"role":"system","content":system},{"role":"user","content":body_text}]
     try:
         from pyodide.ffi import to_js
         from js import Object
@@ -66,11 +96,11 @@ async def workers_ai(env,model,instructions,body_text,schema,max_output):
         raise Blocked("workers_ai_failed") from None
     if not isinstance(raw,dict):
         raise Blocked("model_schema_invalid")
-    answer=raw.get("response")
-    text=answer if isinstance(answer,str) else json.dumps(answer,ensure_ascii=False)
+    text=json_part(extract_text(raw))
     u=raw.get("usage") or {}
     return {"id":None,"status":"completed",
-            "usage":{"input_tokens":u.get("prompt_tokens"),"output_tokens":u.get("completion_tokens")},
+            "usage":{"input_tokens":u.get("prompt_tokens",u.get("input_tokens")),
+                     "output_tokens":u.get("completion_tokens",u.get("output_tokens"))},
             "output":[{"type":"message","content":[{"type":"output_text","text":text}]}]}
 
 
