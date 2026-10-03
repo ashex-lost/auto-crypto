@@ -132,7 +132,7 @@ async def evaluate_task(store,s,candidate,analysis):
     blockers=list(screened.get('handoff_blockers',[]))
     if analysis.get("recommendation")=="reject": blockers.append('ai_rejected')
     if analysis.get("borrowing_required") is not False: blockers.append('borrowing_or_unknown')
-    if analysis.get("eligibility")=="not_eligible": blockers.append('not_eligible')
+    # Region/eligibility doubts are a warning, not a block: you try first and mark real rejections.
     if analysis.get("manual_participation")!="allowed": blockers.append('manual_participation_not_confirmed')
     if analysis.get("requires_funds") is not False: blockers.append('needs_separate_funding_plan')
     check=await store.one("SELECT result FROM task_checks WHERE opportunity_id=? AND status='checked'",candidate["id"])
@@ -161,7 +161,8 @@ async def evaluate_task(store,s,candidate,analysis):
              "fingerprint_hint":candidate["fingerprint"][:16],
              "ev":ev,
              "warnings":["奖励可能为零；抽奖/积分/未公布空投不计收入。"]+(["需要公开发帖，内容由你本人撰写并决定是否发布。"] if data.get("requires_public_post") else [])
-                        +(["资格未完全确认，请在官方页面核对。"] if analysis.get("eligibility")!="confirmed" else [])}
+                        +(["AI 认为你可能不符合资格：先试，被拒就在控制台标记“账户不能参加”，同类项目以后自动跳过。"] if analysis.get("eligibility")=="not_eligible" else [])
+                        +(["资格未完全确认，请在官方页面核对。"] if analysis.get("eligibility")=="unknown" else [])}
     try:
         handoff=prepare({**data,"title":candidate["title"],"url":candidate["url"]},context=context)
     except Blocked as e:
@@ -294,8 +295,13 @@ async def tick(env,store,cron=False):
         # Free fixed-rule screening of a whole batch; no model, wallet or network cost.
         batch=await store.all("SELECT * FROM opportunities WHERE (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND (status='discovered' OR (status IN ('screened_out','awaiting_ai') AND COALESCE(screening_version,'')!=?)) ORDER BY CASE source WHEN 'task' THEN 0 ELSE 1 END, observed_at DESC LIMIT ?",SCREENING_VERSION,SCREEN_BATCH)
         passed=0
+        from strategy import project_key
         for row in batch:
             screened=prescreen(row,t,s)
+            # Try first; only projects that actually rejected your account are skipped from then on.
+            if await store.one("SELECT 1 AS x FROM ineligible_keys WHERE key=?",project_key(row)):
+                screened['eligible_for_analysis']=False
+                screened['reasons']=list(screened.get('reasons',[]))+['previously_ineligible']
             screened['cost_estimate']=research_estimate(json.loads(row['data']),s)
             screened['checked_at']=t
             ok=screened['eligible_for_analysis']; passed+=int(ok)

@@ -68,3 +68,27 @@ class Console(unittest.IsolatedAsyncioTestCase):
         raffle=[c for c in d['categories'] if c['category']=='raffle'][0]
         self.assertEqual(raffle['finished'],1);self.assertEqual(raffle['win_rate'],0)
         self.assertEqual(d['ranking'][0]['priority'],5)
+
+
+class TryFirst(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.db=D1();self.store=Store(self.db);self.app=worker.Default(SimpleNamespace(DB=self.db,ADMIN_TOKEN=TOKEN))
+    async def asyncTearDown(self): self.db.conn.close()
+
+    async def test_rejection_skips_same_project_only(self):
+        from collector import save_candidate
+        from galxe import candidate
+        from engine import tick
+        from common import now
+        def row(i): return {'id':i,'name':'T','type':'Drop','status':'Active','description':'d','startTime':now()-60,
+                            'endTime':now()+5*86400,'cap':0,'participantsCount':1,'loyaltyPoints':0,'gasType':'Gasless'}
+        await save_candidate(self.store,candidate(row('A1'),'40'))
+        r=await self.app.fetch(Req('/api/activities/galxe:A1',{'ineligible':True}));self.assertEqual(r.status,200)
+        await save_candidate(self.store,candidate(row('A2'),'40'))   # same Galxe space
+        await save_candidate(self.store,candidate(row('B1'),'77'))   # different project
+        await self.store.run('UPDATE control SET paused=0,next_discovery=? WHERE id=1',now()+86400)
+        await tick(SimpleNamespace(),self.store)
+        a2=await self.store.one("SELECT status,screening FROM opportunities WHERE id='galxe:A2'")
+        b1=await self.store.one("SELECT status FROM opportunities WHERE id='galxe:B1'")
+        self.assertIn('previously_ineligible',json.loads(a2['screening'])['reasons'])
+        self.assertEqual(b1['status'],'awaiting_ai')

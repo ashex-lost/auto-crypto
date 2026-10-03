@@ -97,7 +97,8 @@ class Default(WorkerEntrypoint):
                                     "ev_usd":ev and ev.get("ev_usd"),"score":ev and ev.get("score"),
                                     "p_paid":ev and ev.get("p_paid"),"payout_usd":ev and ev.get("payout_usd"),"basis":ev and ev.get("basis")})
                 ranking.sort(key=lambda x:(x["skipped"],-x["priority"],-(x["score"] if x["score"] is not None else -1e9)))
-                return response({**(await report(store,s)),"ranking":ranking[:100]})
+                blocked=await store.all("SELECT key,reason,example_id,at FROM ineligible_keys ORDER BY at DESC")
+                return response({**(await report(store,s)),"ranking":ranking[:100],"ineligible_projects":blocked})
             if request.method=="GET" and path=="/api/settings":
                 from config import load_settings, OVERRIDABLE
                 row=await store.one("SELECT data,updated_at FROM settings_overrides WHERE id=1")
@@ -134,7 +135,16 @@ class Default(WorkerEntrypoint):
             if m:
                 key=m.group(1); row=await store.one("SELECT id FROM opportunities WHERE id=?",key)
                 if not row: raise Blocked("activity_not_found")
-                if not body or set(body)-{"priority","skip","outcome"}: raise Blocked("invalid_activity_update")
+                if not body or set(body)-{"priority","skip","outcome","ineligible"}: raise Blocked("invalid_activity_update")
+                if "ineligible" in body:
+                    from strategy import project_key
+                    full=await store.one("SELECT * FROM opportunities WHERE id=?",key); pk=project_key(full)
+                    if body["ineligible"] is True:
+                        await store.run("INSERT OR REPLACE INTO ineligible_keys(key,reason,example_id,at) VALUES(?,?,?,?)",pk,"account_rejected",key,now())
+                        await store.run("UPDATE opportunities SET skipped=1 WHERE id=?",key)
+                    elif body["ineligible"] is False:
+                        await store.run("DELETE FROM ineligible_keys WHERE key=?",pk)
+                    else: raise Blocked("ineligible_invalid")
                 if "priority" in body:
                     p=body["priority"]
                     if type(p) is not int or not -100<=p<=100: raise Blocked("priority_invalid")
