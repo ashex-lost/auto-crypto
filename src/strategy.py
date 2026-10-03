@@ -56,6 +56,24 @@ def category(opportunity):
     return "other"
 
 
+def project_key(opportunity):
+    """What "similar project" means when one activity rejected your account."""
+    import re
+    data = opportunity["data"]
+    data = json.loads(data) if isinstance(data, str) else data
+    source = opportunity.get("source")
+    if data.get("adapter") == "galxe_read_v1" and data.get("space_id"):
+        return "galxe_space:" + str(data["space_id"])
+    if source == "merkl" and data.get("protocol"):
+        return "protocol:" + str(data["protocol"])
+    if source == "binance":
+        m = re.search(r"launchpool|hodler|megadrop|launchpad|airdrop", str(opportunity.get("title") or ""), re.I)
+        return "binance:" + (m.group(0).lower() if m else "other")
+    if data.get("sponsor"):
+        return "sponsor:" + str(data["sponsor"]).lower()[:80]
+    return "activity:" + str(opportunity.get("id"))
+
+
 def priors(s):
     merged = {k: dict(v) for k, v in DEFAULT_PRIORS.items()}
     for k, v in (s.get("category_priors") or {}).items():

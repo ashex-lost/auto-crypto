@@ -14,7 +14,7 @@ async def proposal(store,s,opportunity,analysis,preview_vault):
         raise Blocked("campaign_not_live")
     if analysis["recommendation"] == "reject" or analysis["borrowing_required"]:
         raise Blocked("activity_rejected")
-    if analysis["automation"]=="prohibited" or analysis["eligibility"]=="not_eligible":
+    if analysis["automation"]=="prohibited":
         raise Blocked("activity_not_permitted")
     matches = [v for v in s["vaults"] if str(v.get("opportunity_id"))==str(data["id"])]
     if len(matches)!=1:

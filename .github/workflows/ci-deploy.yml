@@ -55,8 +55,9 @@ jobs:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           umask 077
-          python3 -c "import json,os;print(json.dumps({k:os.environ[k] for k in ('SETTINGS_JSON','EMAIL_API_KEY','EMAIL_FROM','EMAIL_TO','DASHBOARD_URL') if os.environ.get(k)}))" > "$RUNNER_TEMP/s.json"
+          python3 -c "import json,os;print(json.dumps({k:os.environ[k] for k in ('SETTINGS_JSON','EMAIL_API_KEY','EMAIL_FROM','EMAIL_TO','DASHBOARD_URL','ADMIN_TOKEN') if os.environ.get(k)}))" > "$RUNNER_TEMP/s.json"
           if [ "$(cat "$RUNNER_TEMP/s.json")" != "{}" ]; then pnpm exec wrangler secret bulk "$RUNNER_TEMP/s.json" --name auto-crypto-simulation; fi
           rm -f "$RUNNER_TEMP/s.json"
