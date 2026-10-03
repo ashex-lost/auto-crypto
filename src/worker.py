@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 from workers import WorkerEntrypoint, Response
 from common import Blocked, canonical, json_object, now, digest
 from config import binding, settings
@@ -38,7 +38,7 @@ def response(data,status=200):
 
 class Default(WorkerEntrypoint):
     async def fetch(self,request):
-        path=urlsplit(request.url).path
+        path=unquote(urlsplit(request.url).path)
         if path=="/" and request.method=="GET":
             return Response(PAGE,headers={**HEADERS,"Content-Type":"text/html; charset=utf-8",
                 "Content-Security-Policy":"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"})
@@ -72,13 +72,17 @@ class Default(WorkerEntrypoint):
                 return response({"adapters":[capabilities(self.env)],
                     "task_checks":await store.all("SELECT opportunity_id,checked_at,status,result FROM task_checks ORDER BY checked_at DESC LIMIT 20")})
             if request.method=="GET" and path=="/api/receiver":
+                from config import load_settings
+                from receiver import configuration
                 rows=await store.all("SELECT observed_at,status,chain_id,address,native_raw,assets,error_code FROM receiver_snapshots ORDER BY observed_at DESC LIMIT 20")
                 for row in rows:
                     if row.get("assets"):
                         row["assets"]=json.loads(row["assets"])
-                return response({"configured":bool(binding(self.env,"RECEIVER_ADDRESS") and binding(self.env,"RECEIVER_RPC_URL") and binding(self.env,"RECEIVER_CHAIN_ID")),
-                                 "address":binding(self.env,"RECEIVER_ADDRESS") or None,"chain_id":binding(self.env,"RECEIVER_CHAIN_ID") or None,
-                                 "snapshots":rows})
+                try:
+                    cfg=configuration(self.env,await load_settings(self.env,store))
+                except Blocked:
+                    cfg={"configured":False,"address":None,"chain_id":None}
+                return response({"configured":cfg["configured"],"address":cfg.get("address"),"chain_id":cfg.get("chain_id"),"snapshots":rows})
             if request.method=="GET" and path=="/api/task-handoffs":
                 rows=await store.all("SELECT id,opportunity_id,digest,plan,state,created_at,approved_at,completed_at,evidence FROM task_handoffs ORDER BY created_at DESC LIMIT 30")
                 for row in rows:
@@ -99,6 +103,19 @@ class Default(WorkerEntrypoint):
                 ranking.sort(key=lambda x:(x["skipped"],-x["priority"],-(x["score"] if x["score"] is not None else -1e9)))
                 blocked=await store.all("SELECT key,reason,example_id,at FROM ineligible_keys ORDER BY at DESC")
                 return response({**(await report(store,s)),"ranking":ranking[:100],"ineligible_projects":blocked})
+            m=re.fullmatch(r"/api/activities/([A-Za-z0-9:_-]{1,120})",path)
+            if request.method=="GET" and m:
+                from strategy import category, project_key
+                r=await store.one("SELECT id,source,title,url,status,data,ev,priority,skipped,outcome,observed_at,analysis,screening FROM opportunities WHERE id=?",m.group(1))
+                if not r: raise Blocked("activity_not_found")
+                h=await store.one("SELECT id,digest,state,plan FROM task_handoffs WHERE opportunity_id=? ORDER BY created_at DESC LIMIT 1",r["id"])
+                blocked=await store.one("SELECT 1 AS x FROM ineligible_keys WHERE key=?",project_key(r))
+                return response({"id":r["id"],"title":r["title"],"url":r["url"],"status":r["status"],"category":category(r),
+                    "priority":r["priority"],"skipped":bool(r["skipped"]),"outcome":r["outcome"],"observed_at":r["observed_at"],
+                    "ev":json.loads(r["ev"]) if r["ev"] else None,"analysis":json.loads(r["analysis"]) if r["analysis"] else None,
+                    "screening":json.loads(r["screening"]) if r["screening"] else None,"project_key":project_key(r),
+                    "project_marked_ineligible":bool(blocked),
+                    "handoff":{**h,"plan":json.loads(h["plan"])} if h else None})
             if request.method=="GET" and path=="/api/settings":
                 from config import load_settings, OVERRIDABLE
                 row=await store.one("SELECT data,updated_at FROM settings_overrides WHERE id=1")

@@ -27,6 +27,7 @@ jobs:
       - run: pnpm check:executor
       - run: node tests/executor_runtime.mjs
       - run: pnpm check:bundle
+      - run: pnpm exec wrangler deploy --config fetcher/wrangler.jsonc --dry-run --outdir dist-fetcher
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -46,6 +47,7 @@ jobs:
       # Schema first (additive migrations), then the signer, then the main Worker.
       - run: pnpm exec wrangler d1 migrations apply auto-crypto-sim --remote
       - run: pnpm exec wrangler deploy --config executor/wrangler.jsonc
+      - run: pnpm exec wrangler deploy --config fetcher/wrangler.jsonc
       - run: uv run pywrangler deploy
       # Private runtime config lives in GitHub Actions secrets and is copied to Worker secrets; never in the repo.
       - name: Push runtime secrets
