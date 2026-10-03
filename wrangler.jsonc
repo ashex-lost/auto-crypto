@@ -14,7 +14,7 @@
     "migrations_dir": "migrations"
   }],
   "ai": {"binding": "AI"},
-  "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"}],
+  "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"},{"binding":"FETCHER","service":"auto-crypto-fetcher"}],
   // No plain vars: SETTINGS_JSON and email settings are pushed as Worker secrets from GitHub Actions secrets.
   "keep_vars": false
 }

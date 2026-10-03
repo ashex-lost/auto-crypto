@@ -203,3 +203,23 @@ class GptOssShape(unittest.IsolatedAsyncioTestCase):
     def test_deadline_too_close(self):
         r=assess_task(task(ends_at=now()+3600),s=settings(SimpleNamespace()))
         self.assertIn('deadline_too_close',r['reasons'])
+
+
+class BinanceRelay(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self): self.db=D1();self.store=Store(self.db)
+    async def asyncTearDown(self): self.db.conn.close()
+
+    async def test_uses_tokyo_relay_and_reports_which_part_failed(self):
+        from collector import discover
+        calls=[]
+        async def fake(url,**k):
+            calls.append((url,'fetcher' in k))
+            if 'binance' in url or 'fetcher.internal' in url: raise Blocked('upstream_http_403')
+            return []
+        async def fake_req(url,**k): raise Blocked('upstream_http_403')
+        env=SimpleNamespace(FETCHER=SimpleNamespace(fetch=lambda *a,**k:None))
+        with patch('collector.get_json',new=fake),patch('collector.request',new=fake_req):
+            out=await discover(self.store,0,env)
+        self.assertEqual(out['binance'],{'error':'binance_cms_upstream_http_403'})
+        relayed=[u for u,f in calls if 'fetcher.internal' in u]
+        self.assertTrue(relayed and all(f for u,f in calls if 'fetcher.internal' in u))

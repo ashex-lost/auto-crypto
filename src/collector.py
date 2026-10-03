@@ -91,16 +91,28 @@ async def discover(store, page=0, env=None):
                 continue
             if source == "binance":
                 links = []
+                relay = getattr(env, "FETCHER", None) if env is not None else None
+                def via(url):
+                    # Through the Tokyo relay when deployed; direct otherwise (local tests).
+                    if relay is None:
+                        return url, {}
+                    from urllib.parse import quote
+                    return "https://fetcher.internal/?u=" + quote(url, safe=""), {"fetcher": relay.fetch}
                 try:
                     for catalog in BINANCE_CATALOGS:
-                        links += binance_articles(await get_json(BINANCE_CMS + str(catalog), max_bytes=400000))
-                except Blocked:
-                    # Fallback: static page links (often blocked for server IPs).
-                    parser = Announcements()
-                    parser.feed(await request(BINANCE_LIST, max_bytes=2_000_000))
+                        u, kw = via(BINANCE_CMS + str(catalog))
+                        links += binance_articles(await get_json(u, max_bytes=400000, **kw))
+                except Blocked as cms_error:
+                    # Fallback: static page links. Keep both failure reasons so the console can say which part broke.
+                    try:
+                        u, kw = via(BINANCE_LIST)
+                        parser = Announcements()
+                        parser.feed(await request(u, max_bytes=2_000_000, **kw))
+                    except Blocked as html_error:
+                        raise Blocked("binance_cms_" + str(cms_error)) from None
                     if not parser.links:
-                        raise Blocked("binance_listing_unreadable")
-                    links = [(u, t, None) for u, t in parser.links]
+                        raise Blocked("binance_cms_" + str(cms_error))
+                    links = [(u2, t, None) for u2, t in parser.links]
                 for url, title, released in {u: (u, t, r) for u, t, r in links}.values():
                     if not BINANCE_KEYWORDS.search(title):
                         continue
