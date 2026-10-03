@@ -34,6 +34,8 @@ def assess_task(data, timestamp=None, s=None):
     end=campaign_timestamp(data.get('ends_at'))
     if end is None: reasons.append('deadline_unknown')
     elif end<=timestamp: reasons.append('task_ended')
+    # Checks run every 8 hours and you need time to act: less than 12 hours left is not actionable.
+    elif end-timestamp<12*3600: reasons.append('deadline_too_close')
     if data.get('automation')!='allowed': reasons.append('automation_not_verified')
     if data.get('eligibility')!='confirmed': reasons.append('eligibility_not_verified')
     if data.get('requires_trading') is not False: reasons.append('trading_requirement_or_unknown')

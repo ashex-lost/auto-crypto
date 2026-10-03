@@ -102,6 +102,29 @@ def task_facts(data,analysis):
     return merged,estimated
 
 
+async def activity_ev(store,s,candidate,analysis,screened=None):
+    """Compute and store EV for one activity; history makes each category's estimate self-correcting."""
+    from strategy import category, expected_value, category_history, CATEGORIES
+    data=json.loads(candidate["data"]) if isinstance(candidate["data"],str) else candidate["data"]
+    cat=category(candidate)
+    if candidate.get("source")=="task" and (analysis or {}).get("category") in CATEGORIES and cat in ("points_task","other"):
+        cat=analysis["category"]
+    known=(screened or {}).get("known_cost_usd_micro")
+    missing=(screened or {}).get("missing_costs")
+    official=data.get("official") or {}
+    a=analysis or {}
+    facts={"cash_cost_usd":None if missing else (known or 0)/1e6,
+           "human_minutes":data.get("human_minutes",a.get("estimated_human_minutes")),
+           "ai_cost_usd":a.get("analysis_cost_usd_micro",0)/1e6,
+           "per_person_usd":(data.get("reward_per_person_usd_micro") or 0)/1e6 or a.get("per_person_usd") or None,
+           "pool_usd":a.get("reward_pool_usd") or None,"winners":a.get("winners_count") or None,
+           "participants":official.get("participantsCount") or None}
+    history=(await category_history(store)).get(cat)
+    ev=expected_value(cat,facts,s,history)
+    await store.run("UPDATE opportunities SET ev=? WHERE id=?",canonical(ev),candidate["id"])
+    return ev
+
+
 async def evaluate_task(store,s,candidate,analysis):
     """Tasks never reach the wallet executor. At most they become a manual handoff you approve."""
     data,estimated=task_facts(json.loads(candidate["data"]),analysis)
@@ -115,6 +138,11 @@ async def evaluate_task(store,s,candidate,analysis):
     check=await store.one("SELECT result FROM task_checks WHERE opportunity_id=? AND status='checked'",candidate["id"])
     qualification=json.loads(check["result"]).get("qualification") if check and check["result"] else None
     if qualification=='conditions_not_met': blockers.append('wallet_conditions_not_met')
+    # Expected value replaces the old "fixed reward only" rule: raffles and points can pass if EV is high.
+    ev=await activity_ev(store,s,{**candidate,"data":data},analysis,screened)
+    blockers=[b for b in blockers if b not in ('net_after_time_unknown','net_below_threshold','reward_value_unknown_research_only')]
+    if ev["ev_usd"] is None: blockers.append('ev_unknown')
+    elif ev["ev_usd"]*1e6<s['min_net_usd_micro']: blockers.append('ev_below_threshold')
     if blockers:
         await store.run("UPDATE opportunities SET status='task_review_needed',screening=? WHERE id=?",
                         canonical({**screened,'handoff_blockers':blockers}),candidate["id"])
@@ -131,6 +159,7 @@ async def evaluate_task(store,s,candidate,analysis):
              "known_cost_usd_micro":screened.get("known_cost_usd_micro"),"eligibility":analysis.get("eligibility"),
              "qualification":qualification,"ai_estimated_fields":estimated,
              "fingerprint_hint":candidate["fingerprint"][:16],
+             "ev":ev,
              "warnings":["奖励可能为零；抽奖/积分/未公布空投不计收入。"]+(["需要公开发帖，内容由你本人撰写并决定是否发布。"] if data.get("requires_public_post") else [])
                         +(["资格未完全确认，请在官方页面核对。"] if analysis.get("eligibility")!="confirmed" else [])}
     try:
@@ -212,12 +241,13 @@ async def tick(env,store,cron=False):
         return {"state":"busy"}
     error=None
     try:
-        s=settings(env)
+        from config import load_settings
+        s=await load_settings(env,store)
         control=await store.one("SELECT * FROM control WHERE id=1")
         # Receiver is read-only and intentionally independent of signing/execution.
         # A missing RPC or address becomes an observation, never a reason to stop research.
         try:
-            observed=await snapshot(env)
+            observed=await snapshot(env,s)
             await flag_incoming(store,observed,t)
             await store.run("INSERT INTO receiver_snapshots(observed_at,status,chain_id,address,native_raw,assets) VALUES(?,?,?,?,?,?)",
                             t,observed.get("status","unknown"),observed.get("chain_id"),observed.get("address"),
@@ -249,6 +279,10 @@ async def tick(env,store,cron=False):
         executed=await process_execution(env,store)
         await store.run("UPDATE proposals SET state='expired' WHERE state='pending_approval' AND expires_at<=?",t)
         await store.run("UPDATE task_handoffs SET state='expired' WHERE state IN ('pending_approval','approved') AND CAST(json_extract(plan,'$.context.ends_at') AS INTEGER) BETWEEN 1 AND ?",t)
+        # A completed task with no recorded payout 30 days after its deadline counts as "not paid",
+        # so raffle-style categories learn their real hit rate without you marking every loss.
+        await store.run("""UPDATE opportunities SET outcome='not_paid' WHERE outcome IS NULL AND status='task_done_waiting_reward'
+            AND CAST(json_extract(data,'$.ends_at') AS INTEGER) BETWEEN 1 AND ?""",t-30*86400)
         await periodic_report(store,s,t)
         if control["next_discovery"]<=t:
             # Persist next due time before network I/O. A failed provider cannot create a tight paid loop.
@@ -268,7 +302,7 @@ async def tick(env,store,cron=False):
             await store.run("UPDATE opportunities SET screening=?,screening_version=?,status=? WHERE id=?",
                             canonical(screened),SCREENING_VERSION,'awaiting_ai' if ok else 'screened_out',row['id'])
         if model_ready(env,s):
-            candidate=await store.one("SELECT * FROM opportunities WHERE status='awaiting_ai' AND (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND observed_at>? ORDER BY CASE source WHEN 'task' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1",t-86400)
+            candidate=await store.one("SELECT * FROM opportunities WHERE status='awaiting_ai' AND skipped=0 AND (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND observed_at>? ORDER BY priority DESC, CASE source WHEN 'task' THEN 0 WHEN 'bounty' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1",t-86400)
             if candidate:
                 # Unknown API outcomes are NOT automatically resubmitted after a process restart.
                 await store.run("UPDATE opportunities SET status='analyzing' WHERE id=?",candidate["id"])
