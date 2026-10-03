@@ -49,7 +49,8 @@ class Default(WorkerEntrypoint):
         try:
             store=Store(self.env.DB)
             if request.method=="GET" and path=="/api/status":
-                s=settings(self.env);control=await store.one("SELECT * FROM control WHERE id=1")
+                from config import load_settings
+                s=await load_settings(self.env,store);control=await store.one("SELECT * FROM control WHERE id=1")
                 if not control:
                     raise Blocked("database_not_initialized")
                 proposals=await store.all("SELECT * FROM proposals ORDER BY created_at DESC LIMIT 20")
@@ -83,6 +84,26 @@ class Default(WorkerEntrypoint):
                 for row in rows:
                     row["plan"]=json.loads(row["plan"])
                 return response({"handoffs":rows})
+            if request.method=="GET" and path=="/api/strategy":
+                from config import load_settings
+                from strategy import report, category
+                s=await load_settings(self.env,store)
+                rows=await store.all("SELECT id,source,title,url,status,data,ev,priority,skipped,outcome,observed_at FROM opportunities ORDER BY skipped, priority DESC, observed_at DESC LIMIT 300")
+                ranking=[]
+                for r in rows:
+                    ev=json.loads(r["ev"]) if r["ev"] else None
+                    ranking.append({"id":r["id"],"title":r["title"],"url":r["url"],"status":r["status"],"category":category(r),
+                                    "priority":r["priority"],"skipped":bool(r["skipped"]),"outcome":r["outcome"],
+                                    "ev_usd":ev and ev.get("ev_usd"),"score":ev and ev.get("score"),
+                                    "p_paid":ev and ev.get("p_paid"),"payout_usd":ev and ev.get("payout_usd"),"basis":ev and ev.get("basis")})
+                ranking.sort(key=lambda x:(x["skipped"],-x["priority"],-(x["score"] if x["score"] is not None else -1e9)))
+                return response({**(await report(store,s)),"ranking":ranking[:100]})
+            if request.method=="GET" and path=="/api/settings":
+                from config import load_settings, OVERRIDABLE
+                row=await store.one("SELECT data,updated_at FROM settings_overrides WHERE id=1")
+                s=await load_settings(self.env,store)
+                return response({"overrides":json.loads(row["data"]) if row else {},"updated_at":row and row["updated_at"],
+                                 "effective":{k:s.get(k) for k in OVERRIDABLE},"editable_fields":list(OVERRIDABLE)})
             if request.method=="GET" and path=="/api/metrics":
                 return response(await metrics(store))
             if request.method=="GET" and path=="/api/readiness":
@@ -100,6 +121,32 @@ class Default(WorkerEntrypoint):
                 if set(body)!={"opportunity_id"} or not isinstance(body["opportunity_id"],str) or len(body["opportunity_id"])>110:
                     raise Blocked("galxe_invalid_id")
                 return response(await check_eligibility(self.env,store,body["opportunity_id"]))
+            if path=="/api/settings":
+                from config import settings as check_settings
+                if not isinstance(body.get("overrides"),dict) or set(body)!={"overrides"}:
+                    raise Blocked("invalid_settings_update")
+                check_settings(self.env,body["overrides"])  # validates every field before saving
+                await store.run("INSERT INTO settings_overrides(id,data,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at",
+                                canonical(body["overrides"]),now())
+                await store.audit("settings_override","settings",digest(body["overrides"]))
+                return response({"saved":True})
+            m=re.fullmatch(r"/api/activities/([A-Za-z0-9:_-]{1,120})",path)
+            if m:
+                key=m.group(1); row=await store.one("SELECT id FROM opportunities WHERE id=?",key)
+                if not row: raise Blocked("activity_not_found")
+                if not body or set(body)-{"priority","skip","outcome"}: raise Blocked("invalid_activity_update")
+                if "priority" in body:
+                    p=body["priority"]
+                    if type(p) is not int or not -100<=p<=100: raise Blocked("priority_invalid")
+                    await store.run("UPDATE opportunities SET priority=? WHERE id=?",p,key)
+                if "skip" in body:
+                    if type(body["skip"]) is not bool: raise Blocked("skip_invalid")
+                    await store.run("UPDATE opportunities SET skipped=? WHERE id=?",int(body["skip"]),key)
+                if "outcome" in body:
+                    if body["outcome"] not in ("paid","not_paid",None): raise Blocked("outcome_invalid")
+                    await store.run("UPDATE opportunities SET outcome=? WHERE id=?",body["outcome"],key)
+                await intervened(store,"activity_update",key,key)
+                return response({"updated":key})
             if path=="/api/ledger/income":
                 entry=income_entry(body,now())
                 key=digest(entry)
@@ -107,6 +154,8 @@ class Default(WorkerEntrypoint):
                                 key,entry["source_ref"],entry["opportunity_id"],entry["asset"],entry["amount_raw"],entry["decimals"],
                                 entry["usd_micro"],entry["price_basis"],entry["tx_hash"],entry["evidence"],entry["received_at"],now())
                 await intervened(store,"record_income",key,entry["opportunity_id"])
+                if entry["opportunity_id"]:
+                    await store.run("UPDATE opportunities SET outcome='paid' WHERE id=?",entry["opportunity_id"])
                 return response({"recorded":key,"realized":(await summary(store))["realized"]})
             if path=="/api/ledger/cost":
                 entry=cost_entry(body,now()); key="manual:"+digest(entry)

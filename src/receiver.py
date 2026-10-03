@@ -30,10 +30,12 @@ def _assets(env):
                        "decimals":int(item.get("decimals",18))})
     return result
 
-def configuration(env):
-    receiver=address(str(binding(env,"RECEIVER_ADDRESS"))) if binding(env,"RECEIVER_ADDRESS") else ""
-    rpc=str(binding(env,"RECEIVER_RPC_URL"))
-    chain=str(binding(env,"RECEIVER_CHAIN_ID",""))
+def configuration(env,s=None):
+    s=s or {}
+    raw=s.get("receiver_address") or binding(env,"RECEIVER_ADDRESS")
+    receiver=address(str(raw)) if raw else ""
+    rpc=str(s.get("receiver_rpc_url") or binding(env,"RECEIVER_RPC_URL"))
+    chain=str(s.get("receiver_chain_id") or binding(env,"RECEIVER_CHAIN_ID",""))
     if not receiver or not rpc or not chain:
         return {"configured":False,"address":receiver or None,"chain_id":int(chain) if chain.isdigit() else None}
     if not rpc.startswith("https://"):
@@ -45,11 +47,11 @@ def configuration(env):
         raise Blocked("receiver_chain_unsupported")
     return {"configured":True,"address":receiver,"chain_id":chain_id,"assets":_assets(env)}
 
-async def snapshot(env):
-    cfg=configuration(env)
+async def snapshot(env,s=None):
+    cfg=configuration(env,s)
     if not cfg["configured"]:
         return {"status":"not_configured","address":cfg.get("address"),"chain_id":cfg.get("chain_id")}
-    rpc=str(binding(env,"RECEIVER_RPC_URL")); address_value=cfg["address"]
+    rpc=str((s or {}).get("receiver_rpc_url") or binding(env,"RECEIVER_RPC_URL")); address_value=cfg["address"]
     def call(method,params):
         return get_json(rpc,method="POST",body={"jsonrpc":"2.0","id":1,"method":method,"params":params},
                         headers={"Content-Type":"application/json"},timeout=12)
