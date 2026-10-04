@@ -8,7 +8,7 @@ GENERIC_STEPS=["打开官方活动页面，核对活动方、截止时间和奖�
                "任何要求无限授权、转账、私钥或助记词的步骤都立即停止，并在控制台标记异常。",
                "完成后回到控制台填写完成证据和实际用时；奖励到账后再登记到账记录。"]
 CONTEXT_KEYS=("ends_at","reward_kind","requires_public_post","required_accounts","human_minutes",
-              "net_after_time_usd_micro","known_cost_usd_micro","eligibility","qualification","ai_estimated_fields","warnings","fingerprint_hint")
+              "net_after_time_usd_micro","known_cost_usd_micro","eligibility","qualification","ai_estimated_fields","warnings","fingerprint_hint","ev")
 
 
 def prepare(data, timestamp=None, context=None):

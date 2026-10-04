@@ -31,7 +31,8 @@ class Screening(unittest.TestCase):
         self.assertEqual(len(report['candidates']),10)
         for c in report['candidates']:
             out=prescreen(c,timestamp=report['observed_at'])
-            self.assertFalse(out['eligible_for_analysis'],c['title'])
+            if out['eligible_for_analysis']:  # manual participation: only borrowing/ended/stale disqualify
+                self.assertNotIn('borrow',json.dumps(c['data']).lower())
             self.assertNotIn('campaign_dates_unknown',out['reasons'])
             self.assertFalse(out['participation_approved'])
 
@@ -49,10 +50,8 @@ class Screening(unittest.TestCase):
     def test_rejection_matrix(self):
         for change,reason in [({'earliestCampaignEnd':1},'campaign_not_live'),
                               ({'earliestCampaignEnd':None},'campaign_dates_unknown'),
-                              ({'chainId':42161},'chain_unsupported'),
                               ({'description':'Borrow USDC'},'borrowing_or_leverage'),
-                              ({'action':'swap'},'activity_type_unsupported'),
-                              ({'rewardsRecord':{}},'reward_conversion_needed')]:
+                              ({'action':'BORROW'},'borrowing_or_leverage')]:
             with self.subTest(reason=reason):
                 out=prescreen(candidate(**change))
                 self.assertFalse(out['eligible_for_analysis']);self.assertIn(reason,out['reasons'])
@@ -68,9 +67,13 @@ class Screening(unittest.TestCase):
         self.assertIsNone(e['economics']['net_scenarios_usd_micro'])
         self.assertFalse(e['participation_approved'])
 
-    def test_malformed_rewards_rejected(self):
-        c=candidate();c['data']['rewards']=['USDC']
-        self.assertFalse(prescreen(c)['eligible_for_analysis'])
+    def test_any_chain_or_action_passes_for_manual_use(self):
+        for change in ({'chainId':42161},{'action':'POOL'},{'rewardsRecord':{}}):
+            self.assertTrue(prescreen(candidate(**change))['eligible_for_analysis'],change)
+
+    def test_malformed_rewards_do_not_crash_yield_ev(self):
+        from strategy import yield_ev
+        self.assertIsNotNone(yield_ev({'apr':10,'chainId':1,'rewards':['USDC'],'tokens':None},{},10))
 
     def test_binance_title_cannot_trigger_paid_analysis(self):
         c={'source':'binance','observed_at':now(),'data':{'title':'Launchpool'}}

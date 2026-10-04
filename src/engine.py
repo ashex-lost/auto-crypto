@@ -177,6 +177,58 @@ async def evaluate_task(store,s,candidate,analysis):
     return {"state":"task_handoff_approval","id":handoff["id"]}
 
 
+DEFI_STEPS=["打开官方页面，确认活动仍在进行、年化和奖励代币与控制台一致。",
+            "在 MetaMask 里切换到活动所在的链，只用实验钱包；确认余额够付 Gas。",
+            "存入金额不超过控制台显示的试算本金；授权时把额度改成本次金额，不要无限授权。",
+            "到期或年化明显下降时取回本金，并在 Merkl 领取奖励。",
+            "回控制台登记实际 Gas 和到账，系统据此修正这类活动的估计。"]
+
+
+async def defi_ev(store,s,candidate,t=None):
+    from common import campaign_timestamp
+    from strategy import yield_ev, expected_value, category, category_history
+    t=t or now()
+    data=json.loads(candidate["data"]) if isinstance(candidate["data"],str) else candidate["data"]
+    end=campaign_timestamp(data.get("earliestCampaignEnd"))
+    days=min(30,max(0,(end-t)//86400)) if end else 0
+    y=yield_ev(data,s,days)
+    cat=category(candidate)
+    ev=expected_value(cat,{"yield":y},s,(await category_history(store)).get(cat)) if y else \
+       {"category":cat,"ev_usd":None,"basis":"missing_apr_or_dates","certainty":0.5,"score":None}
+    await store.run("UPDATE opportunities SET ev=? WHERE id=?",canonical(ev),candidate["id"])
+    return ev
+
+
+async def evaluate_defi_manual(store,s,candidate,analysis):
+    ev=await defi_ev(store,s,candidate)
+    blockers=[]
+    if analysis.get("recommendation")=="reject": blockers.append('ai_rejected')
+    if analysis.get("borrowing_required") is not False: blockers.append('borrowing_or_unknown')
+    if ev["ev_usd"] is None: blockers.append('ev_unknown')
+    elif ev["ev_usd"]*1e6<s['min_net_usd_micro']: blockers.append('ev_below_threshold')
+    if blockers:
+        await store.run("UPDATE opportunities SET status='task_review_needed',screening=json_set(COALESCE(screening,'{}'),'$.handoff_blockers',json(?)) WHERE id=?",
+                        canonical(blockers),candidate["id"])
+        return {"state":"task_review_needed","blockers":blockers}
+    existing=await store.one("SELECT id FROM task_handoffs WHERE opportunity_id=? AND state!='expired' AND json_extract(plan,'$.context.fingerprint_hint')=?",candidate["id"],candidate["fingerprint"][:16])
+    if existing:
+        return {"state":"task_handoff_exists","id":existing["id"]}
+    data=json.loads(candidate["data"])
+    y=ev.get("yield") or {}
+    context={"ends_at":data.get("earliestCampaignEnd"),"reward_kind":"fixed","human_minutes":y.get("minutes"),
+             "known_cost_usd_micro":int((ev.get("cash_cost_usd") or 0)*1e6),"ev":ev,"fingerprint_hint":candidate["fingerprint"][:16],
+             "warnings":["年化是快照，已按 50% 计算；本金有合约风险。","奖励代币价格会波动。" if y.get("reward_other_token") else "奖励与本金同币。"]}
+    steps=DEFI_STEPS
+    handoff=prepare({"title":candidate["title"],"url":data.get("depositUrl") or candidate["url"],"steps":steps},context=context)
+    await store.run("INSERT OR IGNORE INTO task_handoffs(id,opportunity_id,digest,plan,state,created_at) VALUES(?,?,?,?,?,?)",
+                    handoff["id"],candidate["id"],handoff["digest"],canonical(handoff["plan"]),"pending_approval",now())
+    await store.run("UPDATE opportunities SET status='task_handoff_pending' WHERE id=?",candidate["id"])
+    await store.event(handoff["id"]+":task_approval","task_handoff_approval_required",
+                      {"id":handoff["id"],"title":handoff["plan"]["title"],"url":handoff["plan"]["url"],
+                       "steps":handoff["plan"]["steps"],"context":handoff["plan"]["context"]})
+    return {"state":"task_handoff_approval","id":handoff["id"]}
+
+
 async def evaluate(env,store,s,candidate,analysis):
     # Recalculate once per day without paying to re-read unchanged rules.
     await store.run("UPDATE opportunities SET evaluation_due=? WHERE id=?",now()+86400,candidate["id"])
@@ -187,6 +239,8 @@ async def evaluate(env,store,s,candidate,analysis):
         await store.run("UPDATE opportunities SET screening=?,screening_version=?,status='screened_out' WHERE id=?",
                         canonical(screened),SCREENING_VERSION,candidate['id'])
         return {'state':'screened','reasons':screened['reasons']}
+    if candidate["source"]=="merkl" and not any(str(v.get("opportunity_id"))==str(json.loads(candidate["data"]).get("id")) for v in s["vaults"]):
+        return await evaluate_defi_manual(store,s,candidate,analysis)
     try:
         p=await proposal(store,s,candidate,analysis,preview_vault=partial(executor,env,"/preview"))
         await store.run("INSERT INTO proposals(id,opportunity_id,fingerprint,plan,digest,created_at,expires_at) VALUES(?,?,?,?,?,?,?)",
@@ -304,11 +358,16 @@ async def tick(env,store,cron=False):
                 screened['reasons']=list(screened.get('reasons',[]))+['previously_ineligible']
             screened['cost_estimate']=research_estimate(json.loads(row['data']),s)
             screened['checked_at']=t
+            if row['source']=='merkl' and screened['eligible_for_analysis']:
+                ev=await defi_ev(store,s,row,t)
+                if ev['ev_usd'] is None or ev['ev_usd']*1e6<s['min_net_usd_micro']:
+                    screened['eligible_for_analysis']=False
+                    screened['reasons']=[r for r in screened.get('reasons',[]) if r!='eligible_for_analysis']+['ev_below_threshold']
             ok=screened['eligible_for_analysis']; passed+=int(ok)
             await store.run("UPDATE opportunities SET screening=?,screening_version=?,status=? WHERE id=?",
                             canonical(screened),SCREENING_VERSION,'awaiting_ai' if ok else 'screened_out',row['id'])
         if model_ready(env,s):
-            candidate=await store.one("SELECT * FROM opportunities WHERE status='awaiting_ai' AND skipped=0 AND (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND observed_at>? ORDER BY priority DESC, CASE source WHEN 'task' THEN 0 WHEN 'bounty' THEN 0 ELSE 1 END, observed_at DESC LIMIT 1",t-86400)
+            candidate=await store.one("SELECT * FROM opportunities WHERE status='awaiting_ai' AND skipped=0 AND (analyzed_fingerprint IS NULL OR analyzed_fingerprint!=fingerprint) AND observed_at>? ORDER BY priority DESC, COALESCE(json_extract(ev,'$.ev_usd'),0) DESC, observed_at DESC LIMIT 1",t-86400)
             if candidate:
                 # Unknown API outcomes are NOT automatically resubmitted after a process restart.
                 await store.run("UPDATE opportunities SET status='analyzing' WHERE id=?",candidate["id"])

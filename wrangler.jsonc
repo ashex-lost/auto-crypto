@@ -14,6 +14,8 @@
     "migrations_dir": "migrations"
   }],
   "ai": {"binding": "AI"},
+  // Run next to the D1 database: one page load does ~20 queries, so this avoids 20 cross-ocean round trips.
+  "placement": { "mode": "smart" },
   "services": [{"binding":"EXECUTOR","service":"auto-crypto-executor"},{"binding":"FETCHER","service":"auto-crypto-fetcher"}],
   // No plain vars: SETTINGS_JSON and email settings are pushed as Worker secrets from GitHub Actions secrets.
   "keep_vars": false

@@ -92,7 +92,7 @@ async def proposal(store,s,opportunity,analysis,preview_vault):
                        "止损会触发退出尝试；合约故障、流动性或价格突变可能使损失超过阈值。"]}
 
 
-SCREENING_VERSION = 'research-v4'
+SCREENING_VERSION = 'research-v5'
 REASONS = {
     'source_stale': '资料超过一天未刷新，先更新再判断。',
     'campaign_not_live': '活动已结束或尚未开放。',
@@ -142,25 +142,12 @@ def prescreen(opportunity, timestamp=None, s=None):
     start=campaign_timestamp(data.get('earliestCampaignStart'))
     if type(start) is int and start>timestamp:
         reasons.append('campaign_not_live')
-    if data.get('chainId') not in (1,56):
-        reasons.append('chain_unsupported')
-    # Conservative textual filter; passing it does not prove absence of borrowing.
+    # You sign manually in MetaMask, so chain, action type and reward token no longer disqualify;
+    # only borrowing/leverage does. Money value is judged by expected value afterwards.
     import re
     text=' '.join(str(data.get(k) or '') for k in ('name','type','action','description','howToSteps')).lower()
-    if re.search(r'borrow|leverag|looping|loop required|借款|杠杆|循环贷',text):
+    if str(data.get('action') or '').upper()=='BORROW' or re.search(r'borrow|leverag|looping|loop required|借款|杠杆|循环贷',text):
         reasons.append('borrowing_or_leverage')
-    action=str(data.get('action') or '').lower().replace('_',' ')
-    if action not in ('lend','deposit','supply'):
-        reasons.append('activity_type_unsupported')
-    tokens=data.get('tokens') or []
-    if not isinstance(tokens,list): tokens=[]
-    if not any(t.get('symbol') in ('USDC','USDT') for t in tokens if isinstance(t,dict)):
-        reasons.append('asset_review_needed')
-    rewards=data.get('rewards') or []
-    stable_addresses={str(t.get('address') or '').lower() for t in tokens if isinstance(t,dict) and t.get('symbol') in ('USDC','USDT')}
-    stable_addresses.discard('')
-    if not isinstance(rewards,list) or not rewards or any(not isinstance(r,dict) or r.get('symbol') not in ('USDC','USDT') or str(r.get('address') or '').lower() not in stable_addresses for r in rewards):
-        reasons.append('reward_conversion_needed')
     reasons=list(dict.fromkeys(reasons))
     return {'version':SCREENING_VERSION,'eligible_for_analysis':not reasons,
             'reasons':reasons or ['eligible_for_analysis'],

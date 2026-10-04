@@ -114,36 +114,104 @@ def calibrated(prior, history):
     return p, pay, w
 
 
+# Rough per-transaction gas in USD by chain (manual MetaMask use). Mainnet is costly; L2s are cents.
+GAS_PER_TX_USD = {1: 1.5, 56: 0.05, 8453: 0.03, 42161: 0.05, 10: 0.03, 137: 0.02, 59144: 0.05, 534352: 0.05}
+DEFAULT_GAS_PER_TX_USD = 0.1
+YIELD_TXS = 4          # approve + deposit + withdraw + claim
+YIELD_MINUTES = 10     # four MetaMask confirmations and checks
+APR_HAIRCUT = 0.5      # APR shown is a snapshot and usually falls
+OTHER_TOKEN_HAIRCUT = 0.7
+
+
+def certainty(basis):
+    """How reliable the EV inputs are. Only used to order activities whose EV ties."""
+    return {"stated_per_person_reward": 1.0, "pool_with_known_participants": 1.0,
+            "apr_snapshot": 0.8, "prior_blended_with_history": 0.8,
+            "category_prior": 0.6}.get(basis, 0.5)
+
+
+def yield_ev(data, s, days):
+    """Deposit / liquidity: principal x APR x days, halved for decay, minus gas. Time is reported, not charged."""
+    principal = (s.get("default_principal_usd_micro") or 50_000_000) / 1e6
+    apr = data.get("apr")
+    if apr is None or days < 1:
+        return None
+    rewards = data.get("rewards") or []
+    tokens = {str(t.get("address") or "").lower() for t in (data.get("tokens") or []) if isinstance(t, dict)}
+    other = any(str(r.get("address") or "").lower() not in tokens for r in rewards if isinstance(r, dict))
+    gross = principal * float(apr) / 100 * days / 365 * APR_HAIRCUT * (OTHER_TOKEN_HAIRCUT if other else 1)
+    gas = GAS_PER_TX_USD.get(data.get("chainId"), DEFAULT_GAS_PER_TX_USD) * YIELD_TXS
+    return {"gross": gross, "cash": gas, "principal": principal, "minutes": YIELD_MINUTES,
+            "days": days, "apr": float(apr), "reward_other_token": other}
+
+
 def expected_value(cat, facts, s, history=None):
-    """facts: cash_cost_usd, human_minutes, ai_cost_usd, and optional activity-specific
-    per_person_usd / pool_usd / winners / participants. Returns USD numbers, None when unknown."""
+    """Returns expected cash result (time is NOT charged; it is a separate sort key).
+    facts: cash_cost_usd, human_minutes, ai_cost_usd, principal_usd and optional
+    per_person_usd / pool_usd / winners / participants / yield (from yield_ev)."""
     prior = priors(s)[cat]
     p, payout, learned = calibrated(prior, history)
     basis = "category_prior" if not learned else "prior_blended_with_history"
     per_person = facts.get("per_person_usd")
     pool, participants, winners = facts.get("pool_usd"), facts.get("participants"), facts.get("winners")
-    if per_person:
-        payout, basis = per_person, "stated_per_person_reward"
-        p = p if p is not None else 0.8
-    elif pool and participants:
-        # Raffle / pro-rata pool: your share of the pool if everyone is equal. Final participation is
-        # usually higher than today's count, so assume it doubles (conservative).
-        expected_participants = max(participants * 2, winners or 1)
-        payout, p, basis = pool / expected_participants, 1.0, "pool_divided_by_expected_participants"
-    gross = p * payout if p is not None and payout is not None else None
-    hourly = (s.get("human_hour_usd_micro") or 0) / 1e6
-    minutes = facts.get("human_minutes")
-    time_cost = None if minutes is None or s.get("human_hour_usd_micro") is None else minutes * hourly / 60
+    y = facts.get("yield")
     cash = facts.get("cash_cost_usd")
+    minutes = facts.get("human_minutes")
+    principal = facts.get("principal_usd") or 0
+    if y:
+        gross, cash, principal, minutes, basis, p, payout = y["gross"], y["cash"], y["principal"], y["minutes"], "apr_snapshot", 1.0, y["gross"]
+    elif per_person:
+        payout, basis = per_person, "stated_per_person_reward"
+        p = 0.8
+        gross = p * payout
+    elif pool and participants:
+        # Your share if everyone is equal; final participation usually ~doubles, so assume that.
+        expected_participants = max(participants * 2, winners or 1)
+        payout, p, basis = pool / expected_participants, 1.0, "pool_with_known_participants"
+        gross = payout
+    else:
+        gross = p * payout if p is not None and payout is not None else None
     ai = facts.get("ai_cost_usd") or 0
-    costs_known = cash is not None and time_cost is not None
-    ev = gross - cash - time_cost - ai if gross is not None and costs_known else None
-    per_min = ev / max(1, minutes) if ev is not None and minutes is not None else None
+    ev = gross - cash - ai if gross is not None and cash is not None else None
+    hours = (minutes or 0) / 60
     return {"category": cat, "p_paid": p, "payout_usd": payout, "gross_ev_usd": gross,
-            "cash_cost_usd": cash, "time_cost_usd": time_cost, "ai_cost_usd": ai,
-            "ev_usd": ev, "ev_per_minute_usd": per_min, "basis": basis,
+            "cash_cost_usd": cash, "ai_cost_usd": ai, "principal_usd": principal,
+            "human_minutes": minutes, "ev_usd": ev,
+            "roi": (ev / principal) if ev is not None and principal else None,
+            "ev_per_hour_usd": (ev / hours) if ev is not None and hours > 0 else None,
+            "basis": basis, "certainty": certainty(basis),
             "history_weight": round(learned, 3), "priority_weight": prior.get("weight", 1.0),
-            "score": None if ev is None else ev * prior.get("weight", 1.0)}
+            "yield": y, "score": ev}
+
+
+DEFAULT_RANK_WEIGHTS = {"amount": 0.4, "hourly": 0.35, "capital": 0.25}
+
+
+def rank(rows, weights=None):
+    """Composite score from percentile ranks (no hourly wage needed):
+    0.4 x rank(EV) + 0.35 x rank(EV per hour of your time) + 0.25 x rank(EV / principal).
+    Activities needing no time or no capital get the top rank for that part.
+    Only EV > 0 is ranked; ties are broken by certainty (1 > 0.8 > 0.6 > 0.5)."""
+    w = {**DEFAULT_RANK_WEIGHTS, **(weights or {})}
+    live = [r for r in rows if r.get("ev_usd") is not None and r["ev_usd"] > 0]
+    def pct(key, value):
+        vals = sorted(key(x) for x in live)
+        if len(vals) <= 1:
+            return 100.0
+        below = sum(1 for v in vals if v < value)
+        return 100.0 * below / (len(vals) - 1)
+    hourly = lambda r: r["ev_per_hour_usd"] if r.get("ev_per_hour_usd") is not None else float("inf")
+    capital = lambda r: r["roi"] if r.get("roi") is not None else float("inf")
+    for r in rows:
+        if r in live:
+            r["rank_amount"] = pct(lambda x: x["ev_usd"], r["ev_usd"])
+            r["rank_hourly"] = pct(hourly, hourly(r))
+            r["rank_capital"] = pct(capital, capital(r))
+            r["composite"] = round(w["amount"] * r["rank_amount"] + w["hourly"] * r["rank_hourly"] + w["capital"] * r["rank_capital"], 2)
+        else:
+            r["composite"] = None
+    rows.sort(key=lambda r: (r.get("composite") is None, -(r.get("composite") or 0), -(r.get("certainty") or 0)))
+    return rows
 
 
 async def category_history(store):
