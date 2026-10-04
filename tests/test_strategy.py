@@ -16,19 +16,35 @@ def s(**kw):
 
 
 class EV(unittest.TestCase):
-    def test_time_dominates_small_tasks(self):
+    def test_time_is_reported_not_charged(self):
         r=expected_value('fixed_task',{'cash_cost_usd':0,'human_minutes':15,'per_person_usd':5},s())
-        self.assertLess(r['ev_usd'],0)  # 0.8*5 - 15 min at $60/h
-        r=expected_value('fixed_task',{'cash_cost_usd':0,'human_minutes':5,'per_person_usd':50},s())
-        self.assertAlmostEqual(r['ev_usd'],40-5)
+        self.assertAlmostEqual(r['ev_usd'],4.0);self.assertEqual(r['human_minutes'],15)
+        self.assertAlmostEqual(r['ev_per_hour_usd'],16.0);self.assertEqual(r['certainty'],1.0)
 
-    def test_raffle_uses_pool_over_expected_participants(self):
+    def test_raffle_with_known_participants_is_certain(self):
         r=expected_value('raffle',{'cash_cost_usd':0,'human_minutes':0,'pool_usd':1000,'participants':100},s())
-        self.assertAlmostEqual(r['ev_usd'],5.0);self.assertEqual(r['basis'],'pool_divided_by_expected_participants')
+        self.assertAlmostEqual(r['ev_usd'],5.0);self.assertEqual(r['basis'],'pool_with_known_participants');self.assertEqual(r['certainty'],1.0)
 
-    def test_unknown_time_value_or_cost_keeps_ev_unknown(self):
+    def test_unknown_cost_keeps_ev_unknown(self):
         self.assertIsNone(expected_value('bounty',{'cash_cost_usd':None,'human_minutes':10},s())['ev_usd'])
-        self.assertIsNone(expected_value('bounty',{'cash_cost_usd':0,'human_minutes':10},s(human_hour_usd_micro=None))['ev_usd'])
+
+    def test_yield_ev_and_roi(self):
+        from strategy import yield_ev
+        y=yield_ev({'apr':36.5,'chainId':8453,'tokens':[{'address':'0xa'}],'rewards':[{'address':'0xa'}]},{'default_principal_usd_micro':100_000_000},20)
+        r=expected_value('points_deposit',{'yield':y},s())
+        self.assertAlmostEqual(r['ev_usd'],100*0.365*20/365*0.5-0.12,places=6)
+        self.assertAlmostEqual(r['roi'],r['ev_usd']/100);self.assertEqual(r['certainty'],0.8)
+        y2=yield_ev({'apr':36.5,'chainId':1,'tokens':[{'address':'0xa'}],'rewards':[{'address':'0xb'}]},{},20)
+        self.assertLess(expected_value('points_deposit',{'yield':y2},s())['ev_usd'],0)  # 50U on mainnet loses to gas
+
+    def test_composite_rank_and_certainty_tiebreak(self):
+        from strategy import rank
+        rows=[{'id':'a','ev_usd':10,'ev_per_hour_usd':10,'roi':None,'certainty':0.6},
+              {'id':'b','ev_usd':10,'ev_per_hour_usd':10,'roi':None,'certainty':1.0},
+              {'id':'c','ev_usd':-1,'ev_per_hour_usd':None,'roi':None,'certainty':1.0},
+              {'id':'d','ev_usd':50,'ev_per_hour_usd':None,'roi':0.5,'certainty':0.5}]
+        out=[r['id'] for r in rank(rows)]
+        self.assertEqual(out[0],'d');self.assertEqual(out[1:3],['b','a']);self.assertEqual(out[-1],'c')
 
     def test_history_pulls_raffle_rate_toward_reality(self):
         prior={'p':0.5,'payout_usd':100,'weight':1}

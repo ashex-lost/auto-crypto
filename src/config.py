@@ -14,7 +14,8 @@ def binding(env, name, default=""):
 # Fields you may change from the console. Budgets and loss caps stay in the private SETTINGS_JSON.
 OVERRIDABLE=("participant_region","accounts","human_hour_usd_micro","speculative_task_max_minutes",
              "min_net_usd_micro","min_reward_to_risk_bps","category_priors","receiver_address",
-             "receiver_chain_id","receiver_rpc_url","model","review_model","ai_calls_per_day","report_days")
+             "receiver_chain_id","receiver_rpc_url","model","review_model","ai_calls_per_day","report_days",
+             "default_principal_usd_micro","rank_weights")
 
 
 def settings(env, overrides=None):
@@ -65,6 +66,9 @@ def settings(env, overrides=None):
         # "workers_ai" uses the Cloudflare AI binding (no external key); "openai" uses MODEL_API_KEY.
         "provider": "openai",
         "category_priors": {},
+        # Test amount for deposit/liquidity activities when the activity sets no minimum.
+        "default_principal_usd_micro": 50_000_000,
+        "rank_weights": {"amount": 0.4, "hourly": 0.35, "capital": 0.25},
         "receiver_address": None,
         "receiver_chain_id": None,
         "receiver_rpc_url": None,
@@ -84,6 +88,10 @@ def settings(env, overrides=None):
     for key in ('review_enabled',):
         if type(defaults[key]) is not bool:
             raise Blocked('settings_invalid')
+    integer(defaults['default_principal_usd_micro'],1,10**11)
+    rw=defaults['rank_weights']
+    if not isinstance(rw,dict) or set(rw)-{'amount','hourly','capital'} or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not 0<=v<=10 for v in rw.values()):
+        raise Blocked('rank_weights_invalid')
     from strategy import validate_priors
     validate_priors(defaults['category_priors'])
     if defaults['receiver_address'] is not None:

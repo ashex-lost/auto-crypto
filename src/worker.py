@@ -36,6 +36,62 @@ def response(data,status=200):
     return Response.from_json(data,status=status,headers=HEADERS)
 
 
+async def strategy_view(env,store):
+    from config import load_settings
+    from strategy import report, category, rank
+    s=await load_settings(env,store)
+    rows=await store.all("SELECT id,source,title,url,status,data,ev,priority,skipped,outcome,observed_at FROM opportunities ORDER BY observed_at DESC LIMIT 400")
+    ranking=[]
+    for r in rows:
+        ev=json.loads(r["ev"]) if r["ev"] else {}
+        ranking.append({"id":r["id"],"title":r["title"],"url":r["url"],"status":r["status"],"category":category(r),
+                        "priority":r["priority"],"skipped":bool(r["skipped"]),"outcome":r["outcome"],
+                        **{k:ev.get(k) for k in ("ev_usd","roi","ev_per_hour_usd","principal_usd","human_minutes","certainty","basis","p_paid","payout_usd")}})
+    rank(ranking,s.get("rank_weights"))
+    blocked=await store.all("SELECT key,reason,example_id,at FROM ineligible_keys ORDER BY at DESC")
+    return {**(await report(store,s)),"ranking":ranking[:200],"ineligible_projects":blocked,"rank_weights":s.get("rank_weights")}
+
+
+async def status_view(env,store):
+    from config import load_settings
+    s=await load_settings(env,store);control=await store.one("SELECT * FROM control WHERE id=1")
+    if not control:
+        raise Blocked("database_not_initialized")
+    proposals=await store.all("SELECT * FROM proposals ORDER BY created_at DESC LIMIT 20")
+    return {"runtime":{"paused":bool(control["paused"]),"last_tick":control["last_tick"],
+        "last_success":control["last_success"],"last_cron":control["last_cron"],"error":control["error_code"],
+        "sources":await store.all("SELECT * FROM sources"),"model_access_confirmed":s["provider_eligible"],
+        "reviewed_adapters":len(s["vaults"])},
+        "proposals":[{"id":p["id"],"state":p["state"],"digest":p["digest"],"details":json.loads(p["plan"]),"error":p["error_code"]} for p in proposals],
+        "events":await store.all("SELECT id,kind,created_at,delivered_at,payload FROM events ORDER BY created_at DESC LIMIT 20")}
+
+
+async def receiver_view(env,store):
+    from config import load_settings
+    from receiver import configuration
+    rows=await store.all("SELECT observed_at,status,chain_id,address,native_raw,error_code FROM receiver_snapshots ORDER BY observed_at DESC LIMIT 5")
+    try:
+        cfg=configuration(env,await load_settings(env,store))
+    except Blocked:
+        cfg={"configured":False,"address":None,"chain_id":None}
+    return {"configured":cfg["configured"],"address":cfg.get("address"),"chain_id":cfg.get("chain_id"),"snapshots":rows}
+
+
+async def handoffs_view(store):
+    rows=await store.all("SELECT id,opportunity_id,digest,plan,state,created_at,approved_at,completed_at,evidence FROM task_handoffs ORDER BY created_at DESC LIMIT 30")
+    for row in rows:
+        row["plan"]=json.loads(row["plan"])
+    return {"handoffs":rows}
+
+
+async def settings_view(env,store):
+    from config import load_settings, OVERRIDABLE
+    row=await store.one("SELECT data,updated_at FROM settings_overrides WHERE id=1")
+    s=await load_settings(env,store)
+    return {"overrides":json.loads(row["data"]) if row else {},"updated_at":row and row["updated_at"],
+            "effective":{k:s.get(k) for k in OVERRIDABLE},"editable_fields":list(OVERRIDABLE)}
+
+
 class Default(WorkerEntrypoint):
     async def fetch(self,request):
         path=unquote(urlsplit(request.url).path)
@@ -49,60 +105,22 @@ class Default(WorkerEntrypoint):
         try:
             store=Store(self.env.DB)
             if request.method=="GET" and path=="/api/status":
-                from config import load_settings
-                s=await load_settings(self.env,store);control=await store.one("SELECT * FROM control WHERE id=1")
-                if not control:
-                    raise Blocked("database_not_initialized")
-                proposals=await store.all("SELECT * FROM proposals ORDER BY created_at DESC LIMIT 20")
-                candidates=await store.all("SELECT id,title,url,observed_at,status,analysis,screening FROM opportunities ORDER BY observed_at DESC LIMIT 50")
-                for c in candidates:
-                    c["analysis"]=json.loads(c["analysis"]) if c["analysis"] else None
-                    c["screening"]=json.loads(c["screening"]) if c["screening"] else None
-                return response({"runtime":{"paused":bool(control["paused"]),"last_tick":control["last_tick"],
-                    "last_success":control["last_success"],"last_cron":control["last_cron"],"error":control["error_code"],
-                    "sources":await store.all("SELECT * FROM sources"),"model_key_connected":bool(binding(self.env,"MODEL_API_KEY")),
-                    "model_access_confirmed":s["provider_eligible"],"reviewed_adapters":len(s["vaults"]),
-                    "notification_channel":"telegram" if binding(self.env,"TELEGRAM_BOT_TOKEN") and binding(self.env,"TELEGRAM_CHAT_ID") else ("email" if binding(self.env,"EMAIL_TO") and ((binding(self.env,"EMAIL_WEBHOOK_URL") and binding(self.env,"EMAIL_WEBHOOK_TOKEN")) or (binding(self.env,"EMAIL_API_KEY") and binding(self.env,"EMAIL_FROM"))) else "dashboard_only")},
-                    "proposals":[{"id":p["id"],"state":p["state"],"digest":p["digest"],"details":json.loads(p["plan"]),"error":p["error_code"]} for p in proposals],
-                    "opportunities":candidates,"ledger":await summary(store),
-                    "model_runs":await store.all("SELECT id,role,model,prompt_version,created_at,state,reserved_micro,actual_micro,error_code FROM model_runs ORDER BY created_at DESC LIMIT 20"),
-                    "events":await store.all("SELECT id,kind,created_at,delivered_at,payload FROM events ORDER BY created_at DESC LIMIT 20"),
-                    "reviews":[json.loads(r["data"]) for r in await store.all("SELECT data FROM reviews ORDER BY created_at DESC LIMIT 5")]})
+                return response(await status_view(self.env,store))
             if request.method=="GET" and path=="/api/adapters":
                 return response({"adapters":[capabilities(self.env)],
                     "task_checks":await store.all("SELECT opportunity_id,checked_at,status,result FROM task_checks ORDER BY checked_at DESC LIMIT 20")})
             if request.method=="GET" and path=="/api/receiver":
-                from config import load_settings
-                from receiver import configuration
-                rows=await store.all("SELECT observed_at,status,chain_id,address,native_raw,assets,error_code FROM receiver_snapshots ORDER BY observed_at DESC LIMIT 20")
-                for row in rows:
-                    if row.get("assets"):
-                        row["assets"]=json.loads(row["assets"])
-                try:
-                    cfg=configuration(self.env,await load_settings(self.env,store))
-                except Blocked:
-                    cfg={"configured":False,"address":None,"chain_id":None}
-                return response({"configured":cfg["configured"],"address":cfg.get("address"),"chain_id":cfg.get("chain_id"),"snapshots":rows})
+                return response(await receiver_view(self.env,store))
             if request.method=="GET" and path=="/api/task-handoffs":
-                rows=await store.all("SELECT id,opportunity_id,digest,plan,state,created_at,approved_at,completed_at,evidence FROM task_handoffs ORDER BY created_at DESC LIMIT 30")
-                for row in rows:
-                    row["plan"]=json.loads(row["plan"])
-                return response({"handoffs":rows})
+                return response(await handoffs_view(store))
             if request.method=="GET" and path=="/api/strategy":
-                from config import load_settings
-                from strategy import report, category
-                s=await load_settings(self.env,store)
-                rows=await store.all("SELECT id,source,title,url,status,data,ev,priority,skipped,outcome,observed_at FROM opportunities ORDER BY skipped, priority DESC, observed_at DESC LIMIT 300")
-                ranking=[]
-                for r in rows:
-                    ev=json.loads(r["ev"]) if r["ev"] else None
-                    ranking.append({"id":r["id"],"title":r["title"],"url":r["url"],"status":r["status"],"category":category(r),
-                                    "priority":r["priority"],"skipped":bool(r["skipped"]),"outcome":r["outcome"],
-                                    "ev_usd":ev and ev.get("ev_usd"),"score":ev and ev.get("score"),
-                                    "p_paid":ev and ev.get("p_paid"),"payout_usd":ev and ev.get("payout_usd"),"basis":ev and ev.get("basis")})
-                ranking.sort(key=lambda x:(x["skipped"],-x["priority"],-(x["score"] if x["score"] is not None else -1e9)))
-                blocked=await store.all("SELECT key,reason,example_id,at FROM ineligible_keys ORDER BY at DESC")
-                return response({**(await report(store,s)),"ranking":ranking[:100],"ineligible_projects":blocked})
+                return response(await strategy_view(self.env,store))
+            if request.method=="GET" and path=="/api/bootstrap":
+                # One round trip for the whole console; the page caches it and refreshes in the background.
+                parts={"strategy":await strategy_view(self.env,store),"status":await status_view(self.env,store),
+                       "metrics":await metrics(store),"receiver":await receiver_view(self.env,store),
+                       "task-handoffs":await handoffs_view(store),"settings":await settings_view(self.env,store)}
+                return response(parts)
             m=re.fullmatch(r"/api/activities/([A-Za-z0-9:_-]{1,120})",path)
             if request.method=="GET" and m:
                 from strategy import category, project_key
@@ -117,11 +135,7 @@ class Default(WorkerEntrypoint):
                     "project_marked_ineligible":bool(blocked),
                     "handoff":{**h,"plan":json.loads(h["plan"])} if h else None})
             if request.method=="GET" and path=="/api/settings":
-                from config import load_settings, OVERRIDABLE
-                row=await store.one("SELECT data,updated_at FROM settings_overrides WHERE id=1")
-                s=await load_settings(self.env,store)
-                return response({"overrides":json.loads(row["data"]) if row else {},"updated_at":row and row["updated_at"],
-                                 "effective":{k:s.get(k) for k in OVERRIDABLE},"editable_fields":list(OVERRIDABLE)})
+                return response(await settings_view(self.env,store))
             if request.method=="GET" and path=="/api/metrics":
                 return response(await metrics(store))
             if request.method=="GET" and path=="/api/readiness":
@@ -194,7 +208,13 @@ class Default(WorkerEntrypoint):
             if path=="/api/tick":
                 if body:
                     raise Blocked("unknown_field")
-                return response(await tick(self.env,store))
+                # A manual check runs the same full cycle as the scheduled one.
+                result={"state":"idle"}
+                for _ in range(CRON_STEPS):
+                    result=await tick(self.env,store)
+                    if result["state"] in ("idle","paused","blocked","busy"):
+                        break
+                return response(result)
             if path=="/api/control":
                 if set(body)!={"paused"} or type(body["paused"]) is not bool:
                     raise Blocked("invalid_control")

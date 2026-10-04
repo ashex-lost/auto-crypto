@@ -55,13 +55,19 @@ function ago(ts){if(!ts)return '从未';const s=Date.now()/1000-ts;if(s<90)retur
 function nextRun(){const n=new Date();for(let i=0;i<48;i++){const d=new Date(Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate(),0,17)+i*3600e3);if(d.getUTCHours()%8===0&&d>n)return d.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}return '—';}
 function evSpan(v){return h('span',{class:'ev '+(v==null?'unk':v>=0?'pos':'neg')},usd(v));}
 function status(s){const x=STATUS[s]||[REASON[s]||zh(s)||s,''];return h('span',{class:'tag '+x[1]},x[0]);}
-let CACHE={};
-async function load(keys){const out={};await Promise.all(keys.map(async k=>{out[k]=await api(k);CACHE[k]=out[k];}));return out;}
+let BOOT=null,BOOT_AT=0,LOADING=null;try{const c=JSON.parse(localStorage.getItem('ac_boot')||'null');if(c){BOOT=c.d;BOOT_AT=0;}}catch(e){}
+function fetchBoot(){if(!LOADING)LOADING=api('bootstrap').then(d=>{BOOT=d;BOOT_AT=Date.now();LOADING=null;try{localStorage.setItem('ac_boot',JSON.stringify({d}));}catch(e){}return d;},e=>{LOADING=null;throw e;});return LOADING;}
+async function load(keys){const extra=keys.filter(k=>!['strategy','status','metrics','receiver','task-handoffs','settings'].includes(k));
+ const out={};await Promise.all(extra.map(async k=>{out[k]=await api(k);}));
+ if(!BOOT)await fetchBoot();
+ else if(Date.now()-BOOT_AT>20000){const at=location.hash;fetchBoot().then(()=>{if(location.hash===at&&!document.activeElement.matches('input,select'))route();}).catch(()=>{});}
+ for(const k of keys)if(!(k in out))out[k]=BOOT[k];return out;}
+function fresh(){BOOT_AT=0;}
 function view(...kids){$('view').replaceChildren(...kids.flat(2).filter(x=>x!=null&&x!==false).map(x=>x instanceof Node?x:document.createTextNode(String(x))));window.scrollTo(0,0);}
 function login(){view(h('div',{class:'card'},h('h2',{},'输入控制台访问密钥'),h('input',{id:'tk',type:'password',autocomplete:'off',placeholder:'ADMIN_TOKEN'}),
  h('label',{},h('input',{id:'rm',type:'checkbox',style:'width:auto;margin-right:6px'}),'在这台设备上记住（别人拿到设备也能进入）'),
  h('button',{onclick:async()=>{TOKEN=$('tk').value.trim();try{await api('readiness');try{if($('rm').checked)localStorage.setItem('ac_token',TOKEN);}catch(e){}route();}catch(e){toast(e.message);}}},'进入')));}
-async function act(fn,ok){try{await fn();if(ok)toast(ok);route();}catch(e){toast(e.message);}}
+async function act(fn,ok){try{await fn();if(ok)toast(ok);await fetchBoot();route();}catch(e){toast(e.message);}}
 
 async function home(){const d=await load(['status','metrics','receiver']);const r=d.status.runtime;const m=d.metrics;
  $('pill').textContent=r.paused?'已暂停':'运行中';$('pill').className='pill '+(r.paused?'off':'on');
@@ -97,15 +103,29 @@ async function proposal(id){const d=await load(['status']);const p=d.status.prop
    h('label',{},h('input',{id:'ok',type:'checkbox',style:'width:auto;margin-right:6px'}),'我已核对金额、费用、合约、期限和退出条件，接受可能全部损失'),
    h('div',{class:'btns',style:'margin-top:10px'},h('button',{onclick:()=>act(()=>{if(!$('ok').checked)throw Error('请先勾选确认');return api('proposals/'+p.id+'/approve',{digest:p.digest,owner_token:$('own').value});},'已批准')},'批准执行'),h('button',{class:'ghost',onclick:()=>act(()=>api('proposals/'+p.id+'/reject',{}),'已拒绝')},'拒绝'))):null);}
 
-let FILTER='all';const OPEN=new Set();
-async function acts(){const d=(await load(['strategy'])).strategy;const R=d.ranking;
- const want=r=>FILTER==='all'?!r.skipped:FILTER==='go'?(!r.skipped&&(r.status==='task_handoff_pending'||(r.ev_usd!=null&&r.ev_usd>0))):FILTER==='research'?(!r.skipped&&!['screened_out'].includes(r.status)):(r.skipped||r.status==='screened_out');
- const groups={};for(const r of R.filter(want))(groups[r.category]=groups[r.category]||[]).push(r);
- const chips=[['all','全部'],['go','可参加'],['research','研究中'],['out','已筛掉/跳过']].map(([k,l])=>h('button',{class:'chip'+(FILTER===k?' cur':''),onclick:()=>{FILTER=k;acts();}},l));
- const secs=Object.entries(groups).sort((a,b)=>Math.max(...b[1].map(x=>x.ev_usd??-1e9))-Math.max(...a[1].map(x=>x.ev_usd??-1e9))).map(([c,rs])=>{const best=Math.max(...rs.map(x=>x.ev_usd??-1e9));
-  const d=h('details',{open:OPEN.has(c)},h('summary',{},h('span',{},(CAT[c]||c)+' · '+rs.length+' 个'),h('span',{class:'muted'},best>-1e9?'最高 '+usd(best):'')),h('div',{class:'in'},rs.slice(0,40).map(r=>h('a',{href:'#act/'+encodeURIComponent(r.id),class:'row',style:'color:inherit;text-decoration:none'},h('div',{class:'t'},h('div',{},(r.priority?'★'+r.priority+' ':'')+r.title),status(r.status)),evSpan(r.ev_usd)))));
-  d.addEventListener('toggle',()=>d.open?OPEN.add(c):OPEN.delete(c));return d;});
- view(h('div',{class:'chips'},chips),secs.length?secs:h('div',{class:'card muted'},'这个筛选下没有活动'));}
+let FILTER='go',SORT='composite',MAXMIN='',MAXCAP='',MODE='list';const OPEN=new Set();
+const SORTS=[['composite','综合'],['ev','期望金额'],['roi','收益率'],['minutes','人工时间'],['principal','本金']];
+const sorter={composite:(a,b)=>((b.composite??-1)-(a.composite??-1))||((b.certainty||0)-(a.certainty||0)),ev:(a,b)=>((b.ev_usd??-1e9)-(a.ev_usd??-1e9))||((b.certainty||0)-(a.certainty||0)),
+ roi:(a,b)=>((b.roi??(b.principal_usd?-1e9:1e9))-(a.roi??(a.principal_usd?-1e9:1e9))),minutes:(a,b)=>((a.human_minutes??1e9)-(b.human_minutes??1e9))||((b.ev_usd??0)-(a.ev_usd??0)),principal:(a,b)=>((a.principal_usd??0)-(b.principal_usd??0))||((b.ev_usd??0)-(a.ev_usd??0))};
+function meta(r){const x=[];x.push(r.principal_usd?'本金 '+usd(r.principal_usd):'无需本金');if(r.human_minutes!=null)x.push(r.human_minutes+' 分钟');if(r.roi!=null)x.push('收益率 '+(r.roi*100).toFixed(1)+'%');if(r.composite!=null)x.push('综合 '+Math.round(r.composite));return x.join(' · ');}
+function line(r){return h('a',{href:'#act/'+encodeURIComponent(r.id),class:'row',style:'color:inherit;text-decoration:none'},h('div',{class:'t'},h('div',{},(r.priority?'★'+r.priority+' ':'')+r.title),h('small',{},meta(r)),h('div',{},status(r.status))),evSpan(r.ev_usd));}
+function sel(id,val,opts,on){return h('select',{id,style:'width:auto;padding:7px 10px;font-size:14px',onchange:e=>on(e.target.value)},opts.map(([v,l])=>h('option',{value:v,selected:v===val},l)));}
+async function acts(){const d=(await load(['strategy'])).strategy;const W=(BOOT.settings.effective.category_priors)||{};
+ const want=r=>{if((W[r.category]||{}).weight===0)return FILTER==='out';
+  const ok=FILTER==='all'?!r.skipped:FILTER==='go'?(!r.skipped&&r.ev_usd!=null&&r.ev_usd>0&&r.status!=='screened_out'):FILTER==='research'?(!r.skipped&&r.status!=='screened_out'&&!(r.ev_usd>0)):(r.skipped||r.status==='screened_out');
+  return ok&&(MAXMIN===''||(r.human_minutes??0)<=+MAXMIN)&&(MAXCAP===''||(r.principal_usd??0)<=+MAXCAP);};
+ const R=d.ranking.filter(want).sort(sorter[SORT]);
+ const chips=[['go','可参加'],['research','研究中'],['all','全部'],['out','已筛掉/跳过']].map(([k,l])=>h('button',{class:'chip'+(FILTER===k?' cur':''),onclick:()=>{FILTER=k;acts();}},l));
+ const sorts=SORTS.map(([k,l])=>h('button',{class:'chip'+(SORT===k?' cur':''),onclick:()=>{SORT=k;acts();}},l));
+ const bar=h('div',{class:'chips'},sel('mm',MAXMIN,[['','人工不限'],['5','≤5 分钟'],['15','≤15 分钟'],['30','≤30 分钟'],['60','≤60 分钟']],v=>{MAXMIN=v;acts();}),
+  sel('mc',MAXCAP,[['','本金不限'],['0','无需本金'],['50','≤50U'],['100','≤100U'],['500','≤500U']],v=>{MAXCAP=v;acts();}),
+  h('button',{class:'chip',onclick:()=>{MODE=MODE==='list'?'cat':'list';acts();}},MODE==='list'?'按分类看':'按排行看'));
+ let body;
+ if(MODE==='list')body=h('div',{class:'card'},R.length?R.slice(0,60).map(line):h('div',{class:'muted'},'这个筛选下没有活动'));
+ else{const g={};for(const r of R)(g[r.category]=g[r.category]||[]).push(r);
+  body=Object.entries(g).map(([c,rs])=>{const best=Math.max(...rs.map(x=>x.ev_usd??-1e9));const el=h('details',{open:OPEN.has(c)},h('summary',{},h('span',{},(CAT[c]||c)+' · '+rs.length+' 个'),h('span',{class:'muted'},best>-1e9?'最高 '+usd(best):'')),h('div',{class:'in'},rs.slice(0,40).map(line)));el.addEventListener('toggle',()=>el.open?OPEN.add(c):OPEN.delete(c));return el;});
+  if(!body.length)body=h('div',{class:'card muted'},'这个筛选下没有活动');}
+ view(h('div',{class:'chips'},chips),h('div',{class:'chips'},sorts),bar,h('div',{class:'muted',style:'margin:4px 2px'},'共 '+R.length+' 个 · 综合 = 40% 金额 + 35% 每小时收益 + 25% 资金收益率（按排名）'),body);}
 
 async function activity(id){const a=await api('activities/'+encodeURIComponent(id));const ev=a.ev||{};let pr=a.priority;
  const reasons=[...((a.screening||{}).reasons||[]),...(((a.screening||{}).handoff_blockers)||[])].filter((x,i,s)=>s.indexOf(x)===i&&x!=='eligible_for_analysis');
@@ -115,8 +135,11 @@ async function activity(id){const a=await api('activities/'+encodeURIComponent(i
   h('a',{class:'btn',style:'margin-top:10px;width:100%',href:a.url,target:'_blank',rel:'noopener noreferrer'},'打开官方页面')),
   h('div',{class:'card'},h('div',{class:'row'},h('div',{class:'t'},'期望收益'),evSpan(ev.ev_usd)),
    h('div',{class:'row'},h('div',{class:'t muted'},'得奖概率 × 奖励'),h('div',{},pct(ev.p_paid)+' × '+usd(ev.payout_usd))),
-   h('div',{class:'row'},h('div',{class:'t muted'},'现金 / 时间 / AI 成本'),h('div',{},usd(ev.cash_cost_usd)+' / '+usd(ev.time_cost_usd)+' / '+usd(ev.ai_cost_usd))),
-   h('div',{class:'muted',style:'margin-top:6px'},'依据：'+({stated_per_person_reward:'规则写明的每人奖励',pool_divided_by_expected_participants:'奖池 ÷ 预计人数',category_prior:'分类默认估计',prior_blended_with_history:'分类估计 + 历史结果'}[ev.basis]||'还没算'))),
+   h('div',{class:'row'},h('div',{class:'t muted'},'现金成本（Gas 等）/ AI'),h('div',{},usd(ev.cash_cost_usd)+' / '+usd(ev.ai_cost_usd))),
+   h('div',{class:'row'},h('div',{class:'t muted'},'本金 / 人工'),h('div',{},(ev.principal_usd?usd(ev.principal_usd):'无需本金')+' / '+(ev.human_minutes!=null?ev.human_minutes+' 分钟':'未知'))),
+   h('div',{class:'row'},h('div',{class:'t muted'},'收益率 / 每小时收益'),h('div',{},(ev.roi!=null?(ev.roi*100).toFixed(1)+'%':'—')+' / '+usd(ev.ev_per_hour_usd))),
+   h('div',{class:'row'},h('div',{class:'t muted'},'数据可信度'),h('div',{},ev.certainty!=null?String(ev.certainty):'—')),
+   h('div',{class:'muted',style:'margin-top:6px'},'依据：'+({stated_per_person_reward:'规则写明的每人奖励',pool_with_known_participants:'奖池 ÷ 预计人数',apr_snapshot:'年化快照 × 50% − Gas',category_prior:'分类默认估计',prior_blended_with_history:'分类估计 + 历史结果'}[ev.basis]||'还没算'))),
   reasons.length?h('details',{open:true},h('summary',{},'筛选原因（'+reasons.length+'）'),h('div',{class:'in'},reasons.map(x=>h('div',{class:'muted'},'· '+(REASON[x]||zh(x)))))):null,
   an.reason?h('details',{},h('summary',{},'AI 分析'),h('div',{class:'in'},h('div',{},an.reason),(an.risks||[]).map(x=>h('div',{class:'muted'},'风险：'+x)),(an.manual_steps||[]).length?h('ol',{},an.manual_steps.map(x=>h('li',{},x))):null)):null,
   h('div',{class:'card'},h('label',{},'优先级（越大越先处理）'),h('div',{class:'stepper'},h('button',{class:'ghost',onclick:()=>step(-1)},'−'),pv,h('button',{class:'ghost',onclick:()=>step(1)},'＋')),
@@ -141,14 +164,16 @@ async function settingsView(){const d=await load(['settings','readiness','status
  const W={};const wv=c=>(pri[c]&&pri[c].weight!=null)?pri[c].weight:1;
  const rows=Object.entries(CAT).map(([c,l])=>{W[c]=wv(c);const sp=h('span',{},W[c].toFixed(1));const st=x=>{W[c]=Math.max(0,Math.min(10,Math.round((W[c]+x)*10)/10));sp.textContent=W[c].toFixed(1);};
   return h('div',{class:'row'},h('div',{class:'t'},l),h('div',{class:'stepper'},h('button',{class:'ghost',onclick:()=>st(-0.5)},'−'),sp,h('button',{class:'ghost',onclick:()=>st(0.5)},'＋')));});
- view(h('div',{class:'card'},h('label',{},'你每小时的时间价值（美元）'),h('input',{id:'sh',inputmode:'decimal',value:e.human_hour_usd_micro==null?'':e.human_hour_usd_micro/1e6}),
+ view(h('div',{class:'card'},h('label',{},'存款类活动的试算本金（美元）'),h('input',{id:'sp',inputmode:'decimal',value:(e.default_principal_usd_micro||50e6)/1e6}),
+   h('label',{},'综合排序权重：金额 / 每小时收益 / 资金收益率'),h('div',{class:'btns'},['amount','hourly','capital'].map(k=>h('input',{id:'rw_'+k,inputmode:'decimal',value:(e.rank_weights||{})[k]??''}))),
    h('label',{},'最低期望收益（美元，低于不通知你）'),h('input',{id:'sm',inputmode:'decimal',value:e.min_net_usd_micro==null?'':e.min_net_usd_micro/1e6}),
    h('label',{},'钱包公开地址'),h('input',{id:'sa',value:e.receiver_address||'',placeholder:'0x…'})),
-  h('h2',{},'分类权重（排序分 = 期望收益 × 权重，0 = 不做）'),h('div',{class:'card'},rows),
-  h('button',{style:'width:100%;margin-top:6px',onclick:()=>act(()=>{const n=(id,k)=>{const v=$(id).value.trim();if(v==='')delete ov[k];else ov[k]=Math.round(parseFloat(v)*1e6);};n('sh','human_hour_usd_micro');n('sm','min_net_usd_micro');
+  h('h2',{},'分类开关（调到 0 = 不看这类活动）'),h('div',{class:'card'},rows),
+  h('button',{style:'width:100%;margin-top:6px',onclick:()=>act(()=>{const n=(id,k)=>{const v=$(id).value.trim();if(v==='')delete ov[k];else ov[k]=Math.round(parseFloat(v)*1e6);};n('sp','default_principal_usd_micro');n('sm','min_net_usd_micro');
+   const rw={};for(const k of ['amount','hourly','capital']){const v=parseFloat($('rw_'+k).value);if(!isNaN(v))rw[k]=v;}if(Object.keys(rw).length)ov.rank_weights=rw;
    const a=$('sa').value.trim();if(a){ov.receiver_address=a;ov.receiver_chain_id=ov.receiver_chain_id||1;ov.receiver_rpc_url=ov.receiver_rpc_url||'https://ethereum-rpc.publicnode.com';}else delete ov.receiver_address;
    const cp={...(ov.category_priors||{})};for(const c in W){if(W[c]!==1||(cp[c]&&cp[c].weight!=null))cp[c]={...(cp[c]||{}),weight:W[c]};}ov.category_priors=cp;return api('settings',{overrides:ov});},'设置已保存，下次运行生效')},'保存设置'),
-  h('details',{},h('summary',{},'退出登录'),h('div',{class:'in'},h('button',{class:'ghost',style:'width:100%',onclick:()=>{TOKEN='';try{localStorage.removeItem('ac_token');}catch(x){}route();}},'在这台设备上退出'))),
+  h('details',{},h('summary',{},'退出登录'),h('div',{class:'in'},h('button',{class:'ghost',style:'width:100%',onclick:()=>{TOKEN='';try{localStorage.removeItem('ac_token');localStorage.removeItem('ac_boot');}catch(x){}BOOT=null;route();}},'在这台设备上退出'))),
   h('details',{},h('summary',{},'开发者信息'),h('div',{class:'in'},h('pre',{},JSON.stringify({readiness:d.readiness,runtime:d.status.runtime,settings:d.settings},null,1)))));}
 
 const ROUTES={home,todo,acts,review,set:settingsView};

@@ -91,7 +91,7 @@ class Flow(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_model_still_screens_whole_batch_without_blocking(self):
         for i in range(30):
-            row={'id':str(i),'name':'S','chainId':1,'status':'LIVE','action':'deposit','earliestCampaignEnd':now()+9*86400,'apr':10,
+            row={'id':str(i),'name':'S','chainId':8453,'status':'LIVE','action':'deposit','earliestCampaignEnd':now()+9*86400,'apr':200,
                  'tokens':[{'symbol':'USDC','address':'0x'+'1'*40}],
                  'rewardsRecord':{'breakdowns':[{'token':{'symbol':'USDC','address':'0x'+'1'*40}}]}}
             await save_candidate(self.store,merkl_candidate(row))
@@ -223,3 +223,25 @@ class BinanceRelay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out['binance'],{'error':'binance_cms_upstream_http_403'})
         relayed=[u for u,f in calls if 'fetcher.internal' in u]
         self.assertTrue(relayed and all(f for u,f in calls if 'fetcher.internal' in u))
+
+
+class ManualDefi(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.db=D1();self.store=Store(self.db)
+        await self.store.run('UPDATE control SET paused=0,next_discovery=? WHERE id=1',now()+86400)
+    async def asyncTearDown(self): self.db.conn.close()
+
+    async def test_low_ev_never_reaches_ai_and_good_one_becomes_handoff(self):
+        def row(i,apr,chain): return {'id':str(i),'name':'P'+str(i),'chainId':chain,'status':'LIVE','action':'POOL','earliestCampaignEnd':now()+20*86400,'apr':apr,
+                 'tokens':[{'symbol':'USDC','address':'0x'+'1'*40}],'rewardsRecord':{'breakdowns':[{'token':{'symbol':'X','address':'0x'+'2'*40}}]}}
+        await save_candidate(self.store,merkl_candidate(row(1,6,1)))      # mainnet 6% -> gas wins
+        await save_candidate(self.store,merkl_candidate(row(2,500,56)))   # BNB chain 500%
+        await tick(SimpleNamespace(),self.store)
+        low=await self.store.one("SELECT status,screening,ev FROM opportunities WHERE id='merkl:1'")
+        hi=await self.store.one("SELECT * FROM opportunities WHERE id='merkl:2'")
+        self.assertEqual(low['status'],'screened_out');self.assertIn('ev_below_threshold',json.loads(low['screening'])['reasons'])
+        self.assertEqual(hi['status'],'awaiting_ai');self.assertGreater(json.loads(hi['ev'])['ev_usd'],1)
+        r=await evaluate(SimpleNamespace(),self.store,settings(SimpleNamespace()),hi,analysis(requires_funds=True))
+        self.assertEqual(r['state'],'task_handoff_approval')
+        plan=json.loads((await self.store.one('SELECT plan FROM task_handoffs'))['plan'])
+        self.assertIn('不要无限授权',''.join(plan['steps']))
